@@ -440,7 +440,7 @@ switch ($action) {
         $pagibig = (float)$computedDtr['pagibig'];
         $grossPay = round($basicPay + $paidLeavePay + $taxAllow + $nonTaxAllow, 2);
         $taxableIncome = max(0, $basicPay + $computedDtr['taxablePaidLeavePay'] + $taxAllow - $sssGsis - $philhealth - $pagibig);
-        $withTax = computeWithholdingTaxServer($taxableIncome, 2, $settings['taxBrackets']);
+        $withTax = computeWithholdingTaxServer($taxableIncome, 2, $payrollSettings['taxBrackets']);
         $totalDed = round($withTax + $sssGsis + $philhealth + $pagibig, 2);
         $unpaidDeductionAmount = round(max(0, $totalDed - max(0, $grossPay)), 2);
         $netPay = round(max(0, $grossPay - $totalDed), 2);

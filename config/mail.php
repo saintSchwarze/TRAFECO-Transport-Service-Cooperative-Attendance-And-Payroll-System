@@ -5,6 +5,10 @@ $appBaseUrl = trafecoSetting('TRAFECO_APP_BASE_URL');
 if ($appBaseUrl === false || $appBaseUrl === '') {
     $appBaseUrl = $isProduction ? '' : 'http://localhost/capstoneee';
 }
+if (!$isProduction) {
+    $localBaseUrl = trafecoLocalAppBaseUrl();
+    if ($localBaseUrl !== null) $appBaseUrl = $localBaseUrl;
+}
 
 return [
     'host' => trafecoSetting('TRAFECO_SMTP_HOST', ''),
@@ -18,7 +22,17 @@ return [
     'app_base_url' => $appBaseUrl,
 ];
 
-function sendResetEmail(array $cfg, string $to, string $toName, string $subject, string $html): void {
+function trafecoLocalAppBaseUrl(): ?string {
+    $host = (string)($_SERVER['HTTP_HOST'] ?? '');
+    $script = (string)($_SERVER['SCRIPT_NAME'] ?? '');
+    if (!preg_match('/^(?:localhost|127\.0\.0\.1|\[::1\])(?::([0-9]{1,5}))?$/i', $host, $hostMatch)
+        || !preg_match('#^(.*)/api/[^/]+\.php$#', $script, $scriptMatch)) return null;
+    if (isset($hostMatch[1]) && ((int)$hostMatch[1] < 1 || (int)$hostMatch[1] > 65535)) return null;
+    $scheme = !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? 'https' : 'http';
+    return $scheme . '://' . $host . $scriptMatch[1];
+}
+
+function sendAppEmail(array $cfg, string $to, string $toName, string $subject, string $html): void {
     foreach (['host', 'username', 'password', 'from_email', 'app_base_url'] as $key) {
         if (empty($cfg[$key])) throw new RuntimeException('Missing SMTP setting: ' . $key);
     }
@@ -26,7 +40,7 @@ function sendResetEmail(array $cfg, string $to, string $toName, string $subject,
         $url = parse_url($cfg['app_base_url']);
         if (!is_array($url) || strtolower((string)($url['scheme'] ?? '')) !== 'https'
             || empty($url['host']) || isset($url['user']) || isset($url['pass'])) {
-            throw new RuntimeException('Production password reset links require a valid HTTPS application URL.');
+            throw new RuntimeException('Production email links require a valid HTTPS application URL.');
         }
     }
     if (!filter_var($cfg['from_email'], FILTER_VALIDATE_EMAIL)) throw new RuntimeException('Invalid sender email.');

@@ -97,6 +97,38 @@
 
 
 <!-- ============================================================
+     MODAL: Complete registration from emailed invitation
+============================================================ -->
+<div id="registrationModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <span class="modal-title">Complete Registration</span>
+            <button class="close-modal">&times;</button>
+        </div>
+        <div style="padding:1.4rem;">
+            <p id="registrationAccount" style="margin-bottom:1rem;color:var(--text-light);"></p>
+            <div id="registrationMsg" class="message" style="display:none;"></div>
+            <form id="registrationForm">
+                <div class="form-group">
+                    <label for="registrationUsername">Choose Username</label>
+                    <input type="text" id="registrationUsername" class="form-control" autocomplete="username" minlength="3" maxlength="60" pattern="[A-Za-z0-9._]{3,60}" required>
+                </div>
+                <div class="form-group">
+                    <label for="registrationPassword">Choose Password</label>
+                    <input type="password" id="registrationPassword" class="form-control" autocomplete="new-password" minlength="15" required>
+                </div>
+                <div class="form-group">
+                    <label for="registrationConfirmPassword">Confirm Password</label>
+                    <input type="password" id="registrationConfirmPassword" class="form-control" autocomplete="new-password" minlength="15" required>
+                </div>
+                <button type="submit" class="btn">Activate Account</button>
+            </form>
+        </div>
+    </div>
+</div>
+
+
+<!-- ============================================================
      MODAL: Set password from emailed reset link
 ============================================================ -->
 <div id="resetPasswordModal" class="modal">
@@ -469,20 +501,20 @@
 </div>
 <!-- END OF HTML BODY SECTION (Line 1100) -->
 
-<script src="js/core-state.js"></script>
-<script src="js/core-utils.js"></script>
-<script src="js/core-pagination.js"></script>
-<script src="js/core-combobox.js"></script>
-<script src="js/core-accessibility.js"></script>
-<script src="js/auth.js"></script>
-<script src="js/notifications.js"></script>
-<script src="js/sidebar-dashboard.js"></script>
-<script src="js/qr-attendance.js"></script>
-<script src="js/employees.js"></script>
-<script src="js/leave.js"></script>
-<script src="js/payroll-payslips.js"></script>
-<script src="js/reports.js"></script>
-<script src="js/system.js"></script>
+<script src="js/core-state.js?v=20261011-registration"></script>
+<script src="js/core-utils.js?v=20261011-registration"></script>
+<script src="js/core-pagination.js?v=20261011-registration"></script>
+<script src="js/core-combobox.js?v=20261011-registration"></script>
+<script src="js/core-accessibility.js?v=20261011-registration"></script>
+<script src="js/auth.js?v=20261011-registration"></script>
+<script src="js/notifications.js?v=20261011-registration"></script>
+<script src="js/sidebar-dashboard.js?v=20261011-registration"></script>
+<script src="js/qr-attendance.js?v=20261011-registration"></script>
+<script src="js/employees.js?v=20261011-registration"></script>
+<script src="js/leave.js?v=20261011-registration"></script>
+<script src="js/payroll-payslips.js?v=20261011-registration"></script>
+<script src="js/reports.js?v=20261011-registration"></script>
+<script src="js/system.js?v=20261011-registration"></script>
 <script>window.turnstileScriptReady = new Promise((resolve, reject) => { window.onTurnstileLoaded = resolve; window.onTurnstileLoadError = () => reject(new Error('Cloudflare Turnstile failed to load.')); });</script>
 <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onTurnstileLoaded&amp;render=explicit" async defer onerror="onTurnstileLoadError()"></script>
 </body>

@@ -1,11 +1,12 @@
 <?php
 require_once __DIR__ . '/../config/helpers.php';
+require_once __DIR__ . '/../config/registration.php';
 
 commonHeaders();
 $action = $_GET['action'] ?? 'list';
 $body   = json_decode(file_get_contents('php://input'), true) ?? [];
 apiMutationGuard([
-    'create' => 'POST', 'update' => 'PUT', 'delete' => 'DELETE',
+    'create' => 'POST', 'resend-invite' => 'POST', 'update' => 'PUT', 'delete' => 'DELETE',
     'update-contact' => 'PUT', 'upload-photo' => 'POST',
 ]);
 
@@ -73,13 +74,12 @@ switch ($action) {
     // --------------------------------------------------------
     //  POST ?action=create  (manager only)
     //  Body: firstName, lastName, department, position,
-    //        employmentType, salary, phone, hireDate,
-    //        username, email, password
+    //        employmentType, salary, phone, hireDate, email
     // --------------------------------------------------------
     case 'create': {
         $user = requirePermission('createEditEmployees');
 
-        $required = ['firstName','lastName','department','position','username','email','password'];
+        $required = ['firstName','lastName','department','position','email'];
         foreach ($required as $f) {
             if (empty($body[$f])) jsonError("Field '$f' is required.");
         }
@@ -99,9 +99,10 @@ switch ($action) {
         $philOn     = isset($body['philhealthEnabled']) && $body['philhealthEnabled'] ? 1 : 0;
         $pagOn      = isset($body['pagibigEnabled'])   && $body['pagibigEnabled']   ? 1 : 0;
         $hireDate   = $body['hireDate']         ?? null;
-        $username   = strtolower(trim($body['username']));
-        $email      = trim($body['email']);
-        $password   = $body['password'];
+        $emailInput = $body['email'];
+        if (!is_string($emailInput) || strlen($emailInput) > 150) jsonError('Enter a valid email address.');
+        $email = trim($emailInput);
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) jsonError('Enter a valid email address.');
         $gender = $body['gender'] ?? '';
         $maritalStatus = $body['maritalStatus'] ?? '';
         $cohabiting = $body['cohabitingWithSpouse'] ?? null;
@@ -118,33 +119,25 @@ switch ($action) {
         if ($govPagibig !== ''    && !preg_match('/^\d{12}$/', $govPagibig))    jsonError('Pag-IBIG number must be exactly 12 digits.');
         if ($phone !== '' && !preg_match('/^\d{11}$/', $phone)) jsonError('Phone number must be exactly 11 digits.');
 
-        if (strlen($password) < 15 || strlen($password) > 72) jsonError('Password must be 15 to 72 bytes long.');
-
         $db = getDB();
 
-        // Check username / email uniqueness
-        $chk = $db->prepare('SELECT id FROM users WHERE username = ? OR email = ? LIMIT 1');
-        $chk->execute([$username, $email]);
-        if ($chk->fetch()) jsonError('Username or email already exists.');
+        $chk = $db->prepare('SELECT id FROM users WHERE email = ? LIMIT 1');
+        $chk->execute([$email]);
+        if ($chk->fetch()) jsonError('An account with that email already exists.');
 
         // Generate staff ID  EMP + zero-padded count
         $cnt = (int)$db->query('SELECT COUNT(*) FROM users WHERE role="employee"')->fetchColumn();
-        $staffId = 'EMP' . str_pad($cnt + 1, 3, '0', STR_PAD_LEFT);
-
-        // Ensure unique staff_id
-        while ($db->prepare('SELECT id FROM users WHERE staff_id=?')->execute([$staffId]) &&
-               $db->prepare('SELECT id FROM users WHERE staff_id=?')->execute([$staffId]) ) {
+        $staffIdCheck = $db->prepare('SELECT id FROM users WHERE staff_id=? LIMIT 1');
+        do {
             $cnt++;
-            $staffId = 'EMP' . str_pad($cnt + 1, 3, '0', STR_PAD_LEFT);
-            break; // simple single retry
-        }
-
-        $hash = password_hash($password, PASSWORD_BCRYPT);
+            $staffId = 'EMP' . str_pad($cnt, 3, '0', STR_PAD_LEFT);
+            $staffIdCheck->execute([$staffId]);
+        } while ($staffIdCheck->fetchColumn());
 
         $db->beginTransaction();
         try {
-            $db->prepare('INSERT INTO users (username,password,full_name,email,role,staff_id,department) VALUES (?,?,?,?,?,?,?)')
-               ->execute([$username, $hash, "$firstName $lastName", $email, 'employee', $staffId, $department]);
+            $db->prepare('INSERT INTO users (full_name,email,role,staff_id,department,status) VALUES (?,?,?,?,?,"pending")')
+               ->execute(["$firstName $lastName", $email, 'employee', $staffId, $department]);
             $newUserId = (int)$db->lastInsertId();
 
             $db->prepare('INSERT INTO employees (user_id,first_name,last_name,gender,marital_status,cohabiting_with_spouse,department,position,employment_type,basic_salary,hourly_rate,phone,address,emergency_contact_name,emergency_contact_phone,sss_enabled,philhealth_enabled,pagibig_enabled,gov_sss,gov_philhealth,gov_pagibig,hire_date,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
@@ -157,8 +150,26 @@ switch ($action) {
             jsonError('Could not create the employee. Please check the information and try again.', 500);
         }
 
-        auditLog($user['id'], 'create_employee', 'employees', "Created employee $firstName $lastName (staff: $staffId)");
-        jsonOk(['staffId' => $staffId, 'userId' => $newUserId], 'Employee created successfully');
+        $invitationSent = sendRegistrationInvite($db, ['id' => $newUserId, 'full_name' => "$firstName $lastName", 'email' => $email]);
+        auditLog($user['id'], 'create_employee', 'employees', "Created pending employee $firstName $lastName (staff: $staffId), invitation sent=" . ($invitationSent ? 'yes' : 'no'));
+        jsonOk(['staffId' => $staffId, 'userId' => $newUserId, 'invitationSent' => $invitationSent],
+            $invitationSent ? 'Employee created and registration link emailed.' : 'Employee created, but the registration email could not be sent. Use Resend Invitation from the employee list.');
+        break;
+    }
+
+    case 'resend-invite': {
+        $user = requirePermission('createEditEmployees');
+        $id = (int)($body['userId'] ?? 0);
+        if ($id <= 0) jsonError('Employee ID required.');
+        if (!rateLimitAllow('registration-resend-user', (string)$id, 5, 3600)) jsonError('Too many invitations sent. Try again later.', 429);
+        $db = getDB();
+        $st = $db->prepare('SELECT u.id, u.full_name, u.email FROM users u JOIN employees e ON e.user_id=u.id WHERE u.id=? AND u.role="employee" AND u.status="pending" LIMIT 1');
+        $st->execute([$id]);
+        $recipient = $st->fetch();
+        if (!$recipient) jsonError('This employee is not awaiting registration.', 404);
+        if (!sendRegistrationInvite($db, $recipient)) jsonError('The registration email could not be sent. Check SMTP settings and try again.', 503);
+        auditLog($user['id'], 'resend_registration_invite', 'employees', "Resent registration invitation for user id=$id");
+        jsonOk([], 'A new registration link has been emailed. The previous link no longer works.');
         break;
     }
 

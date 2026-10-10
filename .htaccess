@@ -20,3 +20,11 @@ RewriteRule ^(?:config|database|deployment)(?:/|$) - [F,L,NC]
     Header always set Referrer-Policy "no-referrer"
     Header always set Permissions-Policy "camera=(self), microphone=(), geolocation=()"
 </IfModule>
+
+# Revalidate the app shell and scripts after an update so a saved page does not
+# mix old registration screens with a newer API.
+<FilesMatch "(?i)^(?:index\.html|.+\.(?:js|css))$">
+    <IfModule mod_headers.c>
+        Header always set Cache-Control "no-cache, must-revalidate"
+    </IfModule>
+</FilesMatch>

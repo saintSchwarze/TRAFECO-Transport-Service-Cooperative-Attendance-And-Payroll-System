@@ -36,14 +36,14 @@ switch ($action) {
     case 'pending': {
         $user = requirePermission('approveLeave');
         $db   = getDB();
-        $st   = $db->prepare('
+        $st   = $db->prepare(<<<'SQL'
             SELECT lr.*, u.full_name AS employee_name, u.staff_id, u.department,
                    (SELECT MAX(n.created_at) FROM leave_notifications n WHERE n.user_id=lr.user_id AND n.expected_delivery_date=lr.expected_delivery_date AND n.notification_type=CASE WHEN lr.leave_type LIKE 'Maternity Leave%' THEN 'maternity' ELSE 'paternity' END) AS pregnancy_notice_recorded_at
             FROM leave_requests lr
             JOIN users u ON lr.user_id = u.id
             WHERE lr.status = "pending"
             ORDER BY lr.created_at ASC
-        ');
+        SQL);
         $st->execute();
         $requests = $st->fetchAll();
         $docs = $db->prepare('SELECT id,document_type FROM leave_request_attachments WHERE leave_request_id=? ORDER BY id');

@@ -185,9 +185,14 @@ function renderEmployeeListRows(rows) {
         return;
     }
     const htmlRows = rows.map(e => {
-        const statusBadge = e.emp_status === 'active' ? '<span class="badge badge-success">Active</span>' : '<span class="badge badge-danger">Inactive</span>';
+        const statusBadge = e.account_status === 'pending'
+            ? '<span class="badge badge-neutral">Pending registration</span>'
+            : e.emp_status === 'active' && e.account_status === 'active'
+                ? '<span class="badge badge-success">Active</span>'
+                : '<span class="badge badge-danger">Inactive</span>';
         const actions = currentUser.permissions.createEditEmployees ? `<td>
             <button class="action-btn btn-sm" onclick="openEditEmployeeModal(${e.id})"><i class="fas fa-pen"></i> Edit</button>
+            ${e.account_status === 'pending' ? `<button class="action-btn btn-sm" onclick="resendRegistrationInvite(${Number(e.id)})"><i class="fas fa-envelope"></i> Resend Invitation</button>` : ''}
         </td>` : '';
         return `<tr>
             <td><strong>${escapeHtml(e.staff_id)}</strong></td>
@@ -381,7 +386,7 @@ function loadAddEmployee(c) {
 
     c.innerHTML = `<div class="card"><div class="card-header"><div class="card-title"><i class="fas fa-user-plus"></i>Add New Employee</div></div>
         <div style="padding:1.4rem;">
-        <div class="alert alert-info"><i class="fas fa-info-circle"></i><div>Creating an employee also creates their login account. Only the manager can do this.</div></div>
+        <div class="alert alert-info"><i class="fas fa-info-circle"></i><div>Enter the employee's details and email. They will receive a one-time link to choose their own username and password.</div></div>
         <div id="addEmpMsg" class="message" style="display:none;"></div>
         <form id="addEmployeeForm" onsubmit="submitAddEmployee(event)">
             <div style="font-weight:700;font-size:0.9rem;color:var(--green-800);margin-bottom:1rem;border-bottom:2px solid var(--green-100);padding-bottom:0.5rem;">Employee Information</div>
@@ -419,9 +424,7 @@ function loadAddEmployee(c) {
                 <div class="form-col"><div class="form-group"><label>PhilHealth ID Number</label><input type="text" class="form-control" name="govPhilhealth" id="addEmpPhilNum" inputmode="numeric" maxlength="12" placeholder="12 digits" autocomplete="off" oninput="this.value=this.value.replace(/\D/g,'').slice(0,12)"></div></div>
                 <div class="form-col"><div class="form-group"><label>Pag-IBIG MID Number</label><input type="text" class="form-control" name="govPagibig" id="addEmpPagNum" inputmode="numeric" maxlength="12" placeholder="12 digits" autocomplete="off" oninput="this.value=this.value.replace(/\D/g,'').slice(0,12)"></div></div>
             </div>
-            <div style="font-weight:700;font-size:0.9rem;color:var(--green-800);margin-bottom:1rem;margin-top:1rem;border-bottom:2px solid var(--green-100);padding-bottom:0.5rem;">Login Account</div>
-            <div class="form-row"><div class="form-col"><div class="form-group"><label>Username</label><input type="text" class="form-control" name="username" required placeholder="e.g. juan.delacruz" autocomplete="off"></div></div><div class="form-col"><div class="form-group"><label>Initial Password</label><input type="password" class="form-control" name="password" required minlength="15" autocomplete="new-password" placeholder="At least 15 characters"></div></div></div>
-            <button type="submit" class="btn"><i class="fas fa-user-plus"></i> Create Employee &amp; Account</button>
+            <button type="submit" class="btn"><i class="fas fa-envelope"></i> Create Employee &amp; Send Invitation</button>
         </form>
         </div></div>`;
         ['addEmpSss','addEmpPhil','addEmpPag'].forEach(id => {
@@ -444,14 +447,19 @@ async function submitAddEmployee(e) {
     data.philhealthEnabled = document.getElementById('addEmpPhil').checked ? 1 : 0;
     data.pagibigEnabled   = document.getElementById('addEmpPag').checked ? 1 : 0;
     const btn = e.target.querySelector('button[type=submit]');
-    btn.disabled = true; btn.textContent = 'Creating...';
+    btn.disabled = true; btn.textContent = 'Creating and sending...';
     const result = await apiCall(`${API.EMP}?action=create`, 'POST', data);
-    btn.disabled = false; btn.innerHTML = '<i class="fas fa-user-plus"></i> Create Employee &amp; Account';
+    btn.disabled = false; btn.innerHTML = '<i class="fas fa-envelope"></i> Create Employee &amp; Send Invitation';
     if (result.success) {
-        showMsg('addEmpMsg', `Employee created! Staff ID: ${result.staffId}`, 'success');
+        showMsg('addEmpMsg', `${result.message} Staff ID: ${result.staffId}`, result.invitationSent ? 'success' : 'error');
         e.target.reset();
         employeeList = []; // reset cache
     } else {
         showMsg('addEmpMsg', result.message || 'Failed to create employee.', 'error');
     }
+}
+
+async function resendRegistrationInvite(userId) {
+    const result = await apiCall(`${API.EMP}?action=resend-invite`, 'POST', { userId });
+    showToast(result.message || (result.success ? 'Invitation sent.' : 'Could not send invitation.'), result.success ? 'success' : 'error');
 }

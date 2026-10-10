@@ -24,7 +24,8 @@ This guide puts the current PHP/MySQL app online using an InfinityFree free subd
 3. Open that database's phpMyAdmin and import the SQL export.
 4. If the exported database does not already contain `password_reset_tokens`, import `database/migrations/20261008_password_reset_tokens.sql` as well.
 5. Import `database/migrations/20261008_payslip_unpaid_deductions.sql` once to add the uncollected-deduction field, cap existing payslips at ₱0 payable, and recalculate payroll batch totals. Payslip statuses and approval fields are preserved.
-6. Put the exact database host, name, username, and password from the control panel into `config/hosting.php`.
+6. Import `database/migrations/20261011_email_registration.sql` once after importing any database dump. It adds pending accounts and one-time registration invitations. Run it before using Add Employee.
+7. Put the exact database host, name, username, and password from the control panel into `config/hosting.php`. Set `TRAFECO_APP_BASE_URL` to the public HTTPS address so registration links point to the deployed site.
 
 ## 4. Upload the app
 

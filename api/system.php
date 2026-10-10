@@ -139,6 +139,7 @@ switch ($action) {
         if (in_array($row['role'], ['chairman','manager','treasurer'], true)) {
             jsonError('System accounts cannot be deactivated from here.');
         }
+        if ($row['status'] === 'pending') jsonError('This employee must complete email registration before the account can be activated.');
 
         $newStatus = $row['status'] === 'active' ? 'inactive' : 'active';
         $db->prepare('UPDATE users SET status=? WHERE id=?')->execute([$newStatus, $id]);

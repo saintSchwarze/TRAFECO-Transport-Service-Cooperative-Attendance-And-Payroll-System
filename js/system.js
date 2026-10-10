@@ -132,11 +132,14 @@ function renderUserMgmtTable() {
 
     const rows = filtered.map(u => {
         const isSystem = ['manager','treasurer','chairman'].includes(u.role);
-        const statusBadge = u.status==='active' ? '<span class="badge badge-success">Active</span>' : '<span class="badge badge-danger">Inactive</span>';
-        const actions = !isSystem ? `<button class="action-btn ${u.status==='active'?'danger':'btn-sm'} btn-sm" data-user-name="${escapeHtml(u.full_name)}" data-user-status="${escapeHtml(u.status)}" onclick="toggleUser(${Number(u.id)},this.dataset.userName,this.dataset.userStatus)">${u.status==='active'?'Deactivate':'Activate'}</button>` : '<span style="font-size:0.78rem;color:var(--text-light);">System Account</span>';
+        const statusBadge = u.status === 'pending' ? '<span class="badge badge-neutral">Pending registration</span>'
+            : u.status === 'active' ? '<span class="badge badge-success">Active</span>' : '<span class="badge badge-danger">Inactive</span>';
+        const actions = isSystem ? '<span style="font-size:0.78rem;color:var(--text-light);">System Account</span>'
+            : u.status === 'pending' ? `<button class="action-btn btn-sm" onclick="resendRegistrationInvite(${Number(u.id)})">Resend Invitation</button>`
+            : `<button class="action-btn ${u.status==='active'?'danger':'btn-sm'} btn-sm" data-user-name="${escapeHtml(u.full_name)}" data-user-status="${escapeHtml(u.status)}" onclick="toggleUser(${Number(u.id)},this.dataset.userName,this.dataset.userStatus)">${u.status==='active'?'Deactivate':'Activate'}</button>`;
         return `<tr>
             <td>${escapeHtml(u.staff_id)}</td>
-            <td>${escapeHtml(u.username)}</td>
+            <td>${u.status === 'pending' ? '—' : escapeHtml(u.username)}</td>
             <td>${escapeHtml(u.full_name)}</td>
             <td>${escapeHtml(u.email)}</td>
             <td><span class="badge badge-neutral">${u.role.charAt(0).toUpperCase()+u.role.slice(1)}</span></td>

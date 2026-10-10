@@ -1,4 +1,5 @@
 let activeResetToken = '';
+let activeRegistrationToken = '';
 
 document.addEventListener('DOMContentLoaded', function () {
     window.addEventListener('storage', event => {
@@ -9,8 +10,9 @@ document.addEventListener('DOMContentLoaded', function () {
     localStorage.removeItem('trafeco_rememberedUser');
     setupEventListeners();
     renderLoginTurnstile();
-    restoreExistingSession();
     openResetLinkIfPresent();
+    openRegistrationLinkIfPresent();
+    restoreExistingSession();
     populatePayPeriods();
     setupResponsiveTableObserver();
 });
@@ -47,6 +49,7 @@ function setupEventListeners() {
     document.querySelectorAll('.modal').forEach(m => m.addEventListener('click', function (e) { if (e.target === this) this.style.display = 'none'; }));
     document.getElementById('forgotPasswordForm').addEventListener('submit', handleForgotPassword);
     document.getElementById('resetPasswordForm')?.addEventListener('submit', handleResetPassword);
+    document.getElementById('registrationForm')?.addEventListener('submit', handleCompleteRegistration);
     document.getElementById('newPassword').addEventListener('input', checkNewPasswordStrength);
     document.getElementById('psCalcNDCheck')?.addEventListener('change', function () { document.getElementById('psCalcNDSub')?.classList.toggle('visible', this.checked); });
     document.getElementById('psCalcOTCheck')?.addEventListener('change', function () { document.getElementById('psCalcOTSub')?.classList.toggle('visible', this.checked); });
@@ -74,6 +77,7 @@ async function renderLoginTurnstile() {
 }
 
 async function restoreExistingSession() {
+    if (activeRegistrationToken) return;
     const result = await apiCall(`${API.AUTH}?action=me`);
     if (!result.success || !result.user) return;
     currentUser = result.user;
@@ -117,6 +121,44 @@ function openResetLinkIfPresent() {
     activeResetToken = params.get('token') || '';
     window.history.replaceState({}, document.title, window.location.pathname);
     document.getElementById('resetPasswordModal').style.display = 'flex';
+}
+
+async function openRegistrationLinkIfPresent() {
+    const params = new URLSearchParams(window.location.hash.slice(1));
+    const token = params.get('register');
+    if (!token) return;
+    activeRegistrationToken = token;
+    window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
+    document.getElementById('registrationModal').style.display = 'flex';
+    const result = await apiCall(`${API.AUTH}?action=registration-info`, 'POST', { token });
+    if (result.success) {
+        document.getElementById('registrationAccount').textContent = `Set up the account for ${result.account.full_name} (${result.account.email}).`;
+    } else {
+        showMsg('registrationMsg', result.message || 'This registration link is invalid or expired.', 'error');
+        document.getElementById('registrationForm').style.display = 'none';
+    }
+}
+
+async function handleCompleteRegistration(e) {
+    e.preventDefault();
+    const username = document.getElementById('registrationUsername').value.trim().toLowerCase();
+    const password = document.getElementById('registrationPassword').value;
+    const confirm = document.getElementById('registrationConfirmPassword').value;
+    if (!/^[a-z0-9._]{3,60}$/.test(username)) { showMsg('registrationMsg', 'Username must be 3–60 characters and use only letters, numbers, dots, or underscores.', 'error'); return; }
+    if (password.length < 15 || new TextEncoder().encode(password).length > 72) { showMsg('registrationMsg', 'Use a password between 15 and 72 bytes.', 'error'); return; }
+    if (password !== confirm) { showMsg('registrationMsg', 'Passwords do not match.', 'error'); return; }
+    const button = e.target.querySelector('button[type="submit"]');
+    button.disabled = true;
+    const result = await apiCall(`${API.AUTH}?action=complete-registration`, 'POST', { token: activeRegistrationToken, username, password });
+    button.disabled = false;
+    if (result.success) {
+        activeRegistrationToken = '';
+        showMsg('registrationMsg', result.message, 'success');
+        e.target.reset();
+        setTimeout(() => { document.getElementById('registrationModal').style.display = 'none'; }, 1800);
+    } else {
+        showMsg('registrationMsg', result.message || 'Could not complete registration.', 'error');
+    }
 }
 
 // ============================================================

@@ -8,8 +8,9 @@ $action = $_GET['action'] ?? ($_POST['action'] ?? '');
 $body   = json_decode(file_get_contents('php://input'), true) ?? [];
 apiMutationGuard([
     'forgot-password' => 'POST', 'reset-password' => 'POST', 'login' => 'POST',
+    'registration-info' => 'POST', 'complete-registration' => 'POST',
     'logout' => 'POST', 'change-password' => 'POST', 'change-username' => 'POST', 'change-email' => 'POST',
-], ['forgot-password', 'reset-password', 'login']);
+], ['forgot-password', 'reset-password', 'login', 'registration-info', 'complete-registration']);
 
 function verifyTurnstileToken(string $token, string $secret, string $expectedHost): bool {
     $context = stream_context_create([
@@ -35,6 +36,72 @@ function verifyTurnstileToken(string $token, string $secret, string $expectedHos
 }
 
 switch ($action) {
+
+    case 'registration-info': {
+        $token = $body['token'] ?? '';
+        if (!is_string($token) || !preg_match('/^[a-f0-9]{64}$/', $token)) jsonError('This registration link is invalid or expired.');
+        $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+        if (!rateLimitAllow('registration-info-ip', $ip, 30, 3600)) jsonError('Too many requests. Please try again later.', 429);
+        $db = getDB();
+        $st = $db->prepare('SELECT u.full_name, u.email, u.staff_id FROM registration_invites ri JOIN users u ON u.id=ri.user_id WHERE ri.token_hash=? AND ri.expires_at>UTC_TIMESTAMP() AND u.status="pending" LIMIT 1');
+        $st->execute([hash('sha256', $token)]);
+        $account = $st->fetch();
+        if (!$account) jsonError('This registration link is invalid or expired. Ask your manager to resend it.', 404);
+        jsonOk(['account' => $account]);
+        break;
+    }
+
+    case 'complete-registration': {
+        $token = $body['token'] ?? '';
+        $usernameInput = $body['username'] ?? '';
+        $password = $body['password'] ?? '';
+        if (!is_string($token) || !preg_match('/^[a-f0-9]{64}$/', $token)) jsonError('This registration link is invalid or expired.');
+        if (!is_string($usernameInput) || !is_string($password)) jsonError('Enter a valid username and password.');
+        $username = strtolower(trim($usernameInput));
+        if (strlen($username) < 3 || strlen($username) > 60 || !preg_match('/^[a-z0-9._]+$/', $username)) {
+            jsonError('Username must be 3–60 characters and use only letters, numbers, dots, or underscores.');
+        }
+        if (strlen($password) < 15 || strlen($password) > 72) jsonError('Password must be 15 to 72 bytes long.');
+        $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+        if (!rateLimitAllow('registration-complete-ip', $ip, 20, 3600)
+            || !rateLimitAllow('registration-complete-token', hash('sha256', $token), 10, 3600)) {
+            jsonError('Too many attempts. Please try again later.', 429);
+        }
+
+        $db = getDB();
+        $db->beginTransaction();
+        try {
+            $st = $db->prepare('SELECT u.id FROM registration_invites ri JOIN users u ON u.id=ri.user_id WHERE ri.token_hash=? AND ri.expires_at>UTC_TIMESTAMP() AND u.status="pending" LIMIT 1 FOR UPDATE');
+            $st->execute([hash('sha256', $token)]);
+            $account = $st->fetch();
+            if (!$account) {
+                $db->rollBack();
+                jsonError('This registration link is invalid or expired. Ask your manager to resend it.', 404);
+            }
+            $st = $db->prepare('SELECT id FROM users WHERE username=? AND id!=? LIMIT 1');
+            $st->execute([$username, $account['id']]);
+            if ($st->fetch()) {
+                $db->rollBack();
+                jsonError('That username is already taken.', 409);
+            }
+            $db->prepare('UPDATE users SET username=?, password=?, status="active" WHERE id=? AND status="pending"')
+                ->execute([$username, password_hash($password, PASSWORD_DEFAULT), $account['id']]);
+            $db->prepare('DELETE FROM registration_invites WHERE user_id=?')->execute([$account['id']]);
+            $db->commit();
+        } catch (PDOException $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            if ($e->getCode() === '23000') jsonError('That username is already taken.', 409);
+            error_log('Registration completion failed: ' . $e->getMessage());
+            jsonError('Could not complete registration. Please try again.', 500);
+        } catch (Throwable $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            error_log('Registration completion failed: ' . $e->getMessage());
+            jsonError('Could not complete registration. Please try again.', 500);
+        }
+        auditLog((int)$account['id'], 'complete_registration', 'auth', 'Account activated through emailed invitation');
+        jsonOk([], 'Registration complete. You can now sign in.');
+        break;
+    }
 
     case 'turnstile-config': {
         $cfg = require __DIR__ . '/../config/turnstile.php';
@@ -71,7 +138,7 @@ switch ($action) {
             $safeName = htmlspecialchars($user['full_name'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
             $html = '<p>Hello ' . $safeName . ',</p><p>Use the link below to choose a new TRAFECO password. This link expires in one hour and can only be used once.</p><p><a href="' . htmlspecialchars($url, ENT_QUOTES, 'UTF-8') . '">Reset your password</a></p><p>If you did not request this, you can ignore this email.</p>';
             try {
-                sendResetEmail($cfg, $user['email'], $user['full_name'], 'TRAFECO password reset', $html);
+                sendAppEmail($cfg, $user['email'], $user['full_name'], 'TRAFECO password reset', $html);
             } catch (Throwable $e) {
                 $db->prepare('DELETE FROM password_reset_tokens WHERE user_id = ?')->execute([$user['id']]);
                 error_log('Password reset email failed: ' . $e->getMessage());
