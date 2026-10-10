@@ -1,0 +1,22 @@
+# InfinityFree allows Options -Indexes, but currently rejects other Options
+# flags in .htaccess. Keep this file compatible with its shared hosting.
+Options -Indexes
+
+# Keep application internals and deployment material inaccessible over HTTP.
+RewriteEngine On
+RewriteRule ^(?:config|database|deployment)(?:/|$) - [F,L,NC]
+
+<FilesMatch "(?i)\.(sql|bak|old|orig|ini|env|log|conf|dist|zip|tar|gz)$">
+    Require all denied
+</FilesMatch>
+
+<Files "DEPLOYMENT.md">
+    Require all denied
+</Files>
+
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "DENY"
+    Header always set Referrer-Policy "no-referrer"
+    Header always set Permissions-Policy "camera=(self), microphone=(), geolocation=()"
+</IfModule>
