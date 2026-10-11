@@ -153,7 +153,6 @@ function generateSidebar(user) {
                 ${user.permissions.generatePayslips ? '<li><a href="#" class="nav-link" data-page="generate-payroll">Generate Payroll</a></li>' : ''}
                 ${user.permissions.validatePayroll ? '<li><a href="#" class="nav-link" data-page="approve-payroll">Approve Payroll</a></li>' : ''}
                 ${user.permissions.validatePayroll ? '<li><a href="#" class="nav-link" data-page="validate-payroll">Validate Payslip</a></li>' : ''}
-                ${user.permissions.generatePayslips ? '<li><a href="#" class="nav-link" data-page="generate-payslip">Generate Payslip</a></li>' : ''}
                 ${user.permissions.generatePayslips ? '<li><a href="#" class="nav-link" data-page="thirteenth-month">13th Month Pay</a></li>' : ''}
             </ul></li>`;
     }
@@ -244,7 +243,6 @@ function loadPageContent(page) {
         case 'approve-payroll':    loadApprovePayroll(pc); break;
         case 'payslips':           loadPayslips(pc); break;
         case 'validate-payroll':   loadValidatePayroll(pc); break;
-        case 'generate-payslip':   loadGeneratePayslip(pc); break;
         case 'thirteenth-month':   loadThirteenthMonth(pc); break;
         case 'leave-benefits':
         case 'request-leave':      loadRequestLeave(pc); break;

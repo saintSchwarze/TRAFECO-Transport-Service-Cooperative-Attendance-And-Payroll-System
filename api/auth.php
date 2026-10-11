@@ -43,7 +43,7 @@ switch ($action) {
         $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
         if (!rateLimitAllow('registration-info-ip', $ip, 30, 3600)) jsonError('Too many requests. Please try again later.', 429);
         $db = getDB();
-        $st = $db->prepare('SELECT u.full_name, u.email, u.staff_id FROM registration_invites ri JOIN users u ON u.id=ri.user_id WHERE ri.token_hash=? AND ri.expires_at>UTC_TIMESTAMP() AND u.status="pending" LIMIT 1');
+        $st = $db->prepare('SELECT u.email, u.staff_id FROM registration_invites ri JOIN users u ON u.id=ri.user_id WHERE ri.token_hash=? AND ri.expires_at>UTC_TIMESTAMP() AND u.status="pending" LIMIT 1');
         $st->execute([hash('sha256', $token)]);
         $account = $st->fetch();
         if (!$account) jsonError('This registration link is invalid or expired. Ask your manager to resend it.', 404);
@@ -55,18 +55,35 @@ switch ($action) {
         $token = $body['token'] ?? '';
         $usernameInput = $body['username'] ?? '';
         $password = $body['password'] ?? '';
+        $firstName = trim((string)($body['firstName'] ?? ''));
+        $lastName = trim((string)($body['lastName'] ?? ''));
+        $gender = $body['gender'] ?? '';
+        $maritalStatus = $body['maritalStatus'] ?? '';
+        $cohabiting = $body['cohabitingWithSpouse'] ?? null;
+        $phone = preg_replace('/\D+/', '', (string)($body['phone'] ?? ''));
+        $address = trim((string)($body['address'] ?? ''));
+        $emergencyName = trim((string)($body['emergencyContactName'] ?? ''));
+        $emergencyPhone = preg_replace('/\D+/', '', (string)($body['emergencyContactPhone'] ?? ''));
+        $sss = preg_replace('/\D+/', '', (string)($body['sss'] ?? ''));
+        $pagibig = preg_replace('/\D+/', '', (string)($body['pagibig'] ?? ''));
+        $philhealth = preg_replace('/\D+/', '', (string)($body['philhealth'] ?? ''));
+
         if (!is_string($token) || !preg_match('/^[a-f0-9]{64}$/', $token)) jsonError('This registration link is invalid or expired.');
         if (!is_string($usernameInput) || !is_string($password)) jsonError('Enter a valid username and password.');
         $username = strtolower(trim($usernameInput));
-        if (strlen($username) < 3 || strlen($username) > 60 || !preg_match('/^[a-z0-9._]+$/', $username)) {
-            jsonError('Username must be 3–60 characters and use only letters, numbers, dots, or underscores.');
-        }
+        if (strlen($username) < 3 || strlen($username) > 60 || !preg_match('/^[a-z0-9._]+$/', $username)) jsonError('Username must be 3 to 60 characters and use only letters, numbers, dots, or underscores.');
         if (strlen($password) < 15 || strlen($password) > 72) jsonError('Password must be 15 to 72 bytes long.');
+        if (strlen($firstName) < 1 || strlen($firstName) > 80 || strlen($lastName) < 1 || strlen($lastName) > 80) jsonError('Enter a first and last name (maximum 80 characters each).');
+        if (!in_array($gender, ['male','female','other','prefer_not_to_say'], true)) jsonError('Select a valid gender.');
+        if (!in_array($maritalStatus, ['single','married','separated','widowed','other'], true)) jsonError('Select a valid marital status.');
+        if ($maritalStatus === 'married' && !in_array((string)$cohabiting, ['0','1'], true)) jsonError('Select whether you live with your spouse.');
+        if (!preg_match('/^[0-9]{11}$/', $phone) || !preg_match('/^[0-9]{11}$/', $emergencyPhone)) jsonError('Enter phone numbers using 11 digits.');
+        if ($address === '' || strlen($address) > 500 || $emergencyName === '' || strlen($emergencyName) > 120) jsonError('Enter a valid address and emergency contact name.');
+        if (!preg_match('/^[0-9]{10}$/', $sss) || !preg_match('/^[0-9]{12}$/', $pagibig) || !preg_match('/^[0-9]{12}$/', $philhealth)) jsonError('Enter valid SSS (10 digits), Pag-IBIG (12 digits), and PhilHealth (12 digits) numbers.');
+
         $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
         if (!rateLimitAllow('registration-complete-ip', $ip, 20, 3600)
-            || !rateLimitAllow('registration-complete-token', hash('sha256', $token), 10, 3600)) {
-            jsonError('Too many attempts. Please try again later.', 429);
-        }
+            || !rateLimitAllow('registration-complete-token', hash('sha256', $token), 10, 3600)) jsonError('Too many attempts. Please try again later.', 429);
 
         $db = getDB();
         $db->beginTransaction();
@@ -74,18 +91,15 @@ switch ($action) {
             $st = $db->prepare('SELECT u.id FROM registration_invites ri JOIN users u ON u.id=ri.user_id WHERE ri.token_hash=? AND ri.expires_at>UTC_TIMESTAMP() AND u.status="pending" LIMIT 1 FOR UPDATE');
             $st->execute([hash('sha256', $token)]);
             $account = $st->fetch();
-            if (!$account) {
-                $db->rollBack();
-                jsonError('This registration link is invalid or expired. Ask your manager to resend it.', 404);
-            }
+            if (!$account) { $db->rollBack(); jsonError('This registration link is invalid or expired. Ask your manager to resend it.', 404); }
             $st = $db->prepare('SELECT id FROM users WHERE username=? AND id!=? LIMIT 1');
             $st->execute([$username, $account['id']]);
-            if ($st->fetch()) {
-                $db->rollBack();
-                jsonError('That username is already taken.', 409);
-            }
-            $db->prepare('UPDATE users SET username=?, password=?, status="active" WHERE id=? AND status="pending"')
-                ->execute([$username, password_hash($password, PASSWORD_DEFAULT), $account['id']]);
+            if ($st->fetch()) { $db->rollBack(); jsonError('That username is already taken.', 409); }
+            $db->prepare('UPDATE employees SET first_name=?,last_name=?,gender=?,marital_status=?,cohabiting_with_spouse=?,phone=?,address=?,emergency_contact_name=?,emergency_contact_phone=?,gov_sss=?,gov_pagibig=?,gov_philhealth=? WHERE user_id=?')
+                ->execute([$firstName,$lastName,$gender,$maritalStatus,$maritalStatus === 'married' ? (int)$cohabiting : null,$phone,$address,$emergencyName,$emergencyPhone,$sss,$pagibig,$philhealth,$account['id']]);
+            $fullName = trim($firstName . ' ' . $lastName);
+            $db->prepare('UPDATE users SET full_name=?,username=?,password=?,status="active" WHERE id=? AND status="pending"')
+                ->execute([$fullName,$username,password_hash($password, PASSWORD_DEFAULT),$account['id']]);
             $db->prepare('DELETE FROM registration_invites WHERE user_id=?')->execute([$account['id']]);
             $db->commit();
         } catch (PDOException $e) {
@@ -98,7 +112,7 @@ switch ($action) {
             error_log('Registration completion failed: ' . $e->getMessage());
             jsonError('Could not complete registration. Please try again.', 500);
         }
-        auditLog((int)$account['id'], 'complete_registration', 'auth', 'Account activated through emailed invitation');
+        auditLog((int)$account['id'], 'complete_registration', 'auth', 'Employee profile completed through emailed invitation');
         jsonOk([], 'Registration complete. You can now sign in.');
         break;
     }

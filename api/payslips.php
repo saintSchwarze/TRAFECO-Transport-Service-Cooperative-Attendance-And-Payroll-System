@@ -6,8 +6,8 @@ commonHeaders();
 $action = $_GET['action'] ?? 'list';
 $body   = json_decode(file_get_contents('php://input'), true) ?? [];
 apiMutationGuard([
-    'generate' => 'POST', 'approve' => 'PUT', 'decline' => 'PUT',
-    'thirteenth-month-generate' => 'POST', 'generate-payroll' => 'POST',
+    'approve' => 'PUT', 'decline' => 'PUT',
+    'thirteenth-month-batch-generate' => 'POST', 'generate-payroll' => 'POST',
     'approve-payroll-batch' => 'PUT', 'decline-payroll-batch' => 'PUT',
 ]);
 
@@ -216,7 +216,7 @@ function calculateSssEmployeeShare(float $monthlyCompensation): float {
 
 function findOverlappingPayrollBatch(PDO $db, string $cutoffStart, string $cutoffEnd, ?int $excludeId = null, bool $approvedOnly = false): ?array {
     $statusFilter = $approvedOnly ? 'status="approved"' : 'status IN ("pending","approved")';
-    $sql = 'SELECT id, cutoff_start, cutoff_end, status FROM payroll_batches WHERE cutoff_start<=? AND cutoff_end>=? AND ' . $statusFilter;
+    $sql = 'SELECT id, cutoff_start, cutoff_end, status FROM payroll_batches WHERE batch_type="regular" AND cutoff_start<=? AND cutoff_end>=? AND ' . $statusFilter;
     $params = [$cutoffEnd, $cutoffStart];
     if ($excludeId !== null) {
         $sql .= ' AND id!=?';
@@ -320,7 +320,7 @@ switch ($action) {
             FROM payslips p
             JOIN users u ON p.employee_user_id = u.id
             JOIN users g ON p.generated_by = g.id
-            WHERE p.status = "pending"
+            WHERE p.status = "pending" AND p.payroll_batch_id IS NULL
             ORDER BY p.created_at ASC
         ');
         $st->execute();
@@ -353,118 +353,6 @@ switch ($action) {
     }
 
     // --------------------------------------------------------
-    //  POST ?action=generate  (treasurer only)
-    // --------------------------------------------------------
-    case 'generate': {
-        $user = requirePermission('generatePayslips');
-
-        $required = ['employeeUserId','payPeriod','cutoffStart','cutoffEnd'];
-        foreach ($required as $f) {
-            if (empty($body[$f])) jsonError("Field '$f' is required.");
-        }
-
-        $empUserId    = (int)$body['employeeUserId'];
-        $payPeriod    = $body['payPeriod'];
-        $cutoffStart  = $body['cutoffStart'];
-        $cutoffEnd    = $body['cutoffEnd'];
-        $payDate      = $body['payDate']      ?? null;
-        if (!is_string($payPeriod) || !preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $payPeriod)) {
-            jsonError('Enter a valid pay period.');
-        }
-        $empType      = $body['employmentType'] ?? 'Full-time';
-        $daysPresent  = (float)($body['daysPresent'] ?? 0);
-        $daysAbsent   = (float)($body['daysAbsent']  ?? 0);
-        $daysLeave    = (float)($body['daysLeave']   ?? 0);
-        $lateDed      = (float)($body['lateDeduction']    ?? 0);
-        $absenceDed   = (float)($body['absenceDeduction'] ?? 0);
-        $basicPay     = (float)($body['basicPay']      ?? 0);
-        $taxAllow     = (float)($body['taxAllow']       ?? 0);
-        $nonTaxAllow  = (float)($body['nonTaxAllow']    ?? 0);
-        $grossPay     = (float)($body['grossPay']       ?? 0);
-        $withTax      = (float)($body['withholdingTax'] ?? 0);
-        $sssGsis      = (float)($body['sssGsis']        ?? 0);
-        $philhealth   = (float)($body['philhealth']     ?? 0);
-        $pagibig      = (float)($body['pagibig']        ?? 0);
-        $totalDed     = (float)($body['totalDeductions'] ?? 0);
-        $netPay       = (float)($body['netPay']         ?? 0);
-
-        $db = getDB();
-
-        // Verify the person exists and is active (any role — everyone on payroll counts)
-        $chk = $db->prepare('SELECT id FROM users WHERE id = ? AND status = "active" LIMIT 1');
-        $chk->execute([$empUserId]);
-        if (!$chk->fetch()) jsonError('Employee not found.');
-
-        $startDate = DateTime::createFromFormat('!Y-m-d', $cutoffStart);
-        $endDate = DateTime::createFromFormat('!Y-m-d', $cutoffEnd);
-        if (!$startDate || !$endDate || $startDate->format('Y-m-d') !== $cutoffStart || $endDate->format('Y-m-d') !== $cutoffEnd || $endDate < $startDate || $startDate->diff($endDate)->days > 31) {
-            jsonError('Enter a valid pay period.');
-        }
-        $payDate = scheduledPayDateForCutoff($payPeriod, $cutoffStart, $cutoffEnd);
-        if ($payDate === null) jsonError('Use the 26th–10th cutoff for payday on the 15th, or the 11th–25th cutoff for payday on the 30th (month-end in shorter months).');
-        foreach (['taxAllow' => $taxAllow, 'nonTaxAllow' => $nonTaxAllow] as $field => $amount) {
-            if (!is_numeric($body[$field] ?? null) || !is_finite($amount) || $amount < 0 || $amount > 1000000) {
-                jsonError('Allowances must be valid non-negative amounts.');
-            }
-        }
-
-        // Recompute attendance and statutory amounts server-side. The browser
-        // preview is not an authority for payroll values.
-        $payrollSettings = getPayrollSettings($db);
-        $computedDtr = computeDtrForEmployee($db, $empUserId, $cutoffStart, $cutoffEnd, $payrollSettings);
-        if (!$computedDtr) jsonError('Employee payroll details are unavailable.', 404);
-        $taxAllow = round($taxAllow, 2);
-        $nonTaxAllow = round($nonTaxAllow, 2);
-        $basicPay = (float)$computedDtr['earnedBasic'];
-        $paidLeavePay = (float)$computedDtr['paidLeavePay'];
-        $taxableLeavePay = (float)$computedDtr['taxablePaidLeavePay'];
-        $lateDed = (float)$computedDtr['lateDeduction'];
-        $absenceDed = (float)$computedDtr['absenceDeduction'];
-        $daysPresent = (float)$computedDtr['daysPresent'];
-        $daysAbsent = (float)$computedDtr['daysAbsent'];
-        $daysLeave = (float)$computedDtr['daysLeave'];
-        $sssGsis = (float)$computedDtr['sss'];
-        $philhealth = (float)$computedDtr['philhealth'];
-        $pagibig = (float)$computedDtr['pagibig'];
-        $grossPay = round($basicPay + $paidLeavePay + $taxAllow + $nonTaxAllow, 2);
-        $taxableIncome = max(0, $basicPay + $computedDtr['taxablePaidLeavePay'] + $taxAllow - $sssGsis - $philhealth - $pagibig);
-        $withTax = computeWithholdingTaxServer($taxableIncome, 2, $payrollSettings['taxBrackets']);
-        $totalDed = round($withTax + $sssGsis + $philhealth + $pagibig, 2);
-        $unpaidDeductionAmount = round(max(0, $totalDed - max(0, $grossPay)), 2);
-        $netPay = round(max(0, $grossPay - $totalDed), 2);
-        $empType = $computedDtr['employee']['employmentType'];
-
-        // Block paying any of this employee's attendance dates twice.
-        $dupChk = $db->prepare('SELECT cutoff_start,cutoff_end FROM payslips WHERE employee_user_id=? AND payslip_type="regular" AND cutoff_start<=? AND cutoff_end>=? AND status!="declined" LIMIT 1');
-        $dupChk->execute([$empUserId, $cutoffEnd, $cutoffStart]);
-        if ($overlap = $dupChk->fetch()) jsonError("This employee already has a payslip covering {$overlap['cutoff_start']} to {$overlap['cutoff_end']}.", 409);
-
-        $db->prepare('
-            INSERT INTO payslips
-              (employee_user_id, pay_period, cutoff_start, cutoff_end, pay_date, employment_type,
-               days_present, days_absent, days_leave, late_deduction, absence_deduction,
-               basic_pay, paid_leave_pay, taxable_leave_pay, taxable_allow, non_tax_allow,
-               gross_pay, withholding_tax, sss_gsis, philhealth, pagibig,
-               total_deductions, unpaid_deduction_amount, net_pay, status, generated_by)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        ')->execute([
-            $empUserId, $payPeriod, $cutoffStart, $cutoffEnd, $payDate ?: null, $empType,
-            $daysPresent, $daysAbsent, $daysLeave, $lateDed, $absenceDed,
-            $basicPay, $paidLeavePay, $taxableLeavePay, $taxAllow, $nonTaxAllow,
-            $grossPay, $withTax, $sssGsis, $philhealth, $pagibig,
-            $totalDed, $unpaidDeductionAmount, $netPay, 'pending', $user['id']
-        ]);
-
-        $newId = $db->lastInsertId();
-        auditLog($user['id'], 'generate_payslip', 'payslips', "Generated payslip id=$newId for employee=$empUserId, cutoff=$cutoffStart to $cutoffEnd");
-        jsonOk([
-            'payslipId' => $newId,
-            'unpaidDeductionAmount' => $unpaidDeductionAmount,
-        ], 'Payslip submitted for approval');
-        break;
-    }
-
-    // --------------------------------------------------------
     //  PUT ?action=approve&id=PAYSLIP_ID  (chairman only)
     // --------------------------------------------------------
     case 'approve': {
@@ -473,11 +361,12 @@ switch ($action) {
         if (!$id) jsonError('Payslip ID required.');
 
         $db = getDB();
-        $st = $db->prepare('SELECT id, status, employee_user_id, pay_period, payslip_type, cutoff_start, cutoff_end, pay_date FROM payslips WHERE id = ? LIMIT 1');
+        $st = $db->prepare('SELECT id, status, employee_user_id, pay_period, payslip_type, payroll_batch_id, cutoff_start, cutoff_end, pay_date FROM payslips WHERE id = ? LIMIT 1');
         $st->execute([$id]);
         $slip = $st->fetch();
         if (!$slip) jsonError('Payslip not found.', 404);
         if ($slip['status'] !== 'pending') jsonError('Only pending payslips can be approved.');
+        if ($slip['payroll_batch_id'] !== null) jsonError('This payslip belongs to a batch. Review and decide the entire batch from Approve Payroll.', 409);
 
         if ($slip['payslip_type'] === 'regular') {
             $expectedPayDate = $slip['cutoff_start'] !== null && $slip['cutoff_end'] !== null
@@ -512,11 +401,12 @@ switch ($action) {
         if (!$id) jsonError('Payslip ID required.');
 
         $db = getDB();
-        $st = $db->prepare('SELECT id, status, employee_user_id, pay_period FROM payslips WHERE id = ? LIMIT 1');
+        $st = $db->prepare('SELECT id, status, employee_user_id, pay_period, payroll_batch_id FROM payslips WHERE id = ? LIMIT 1');
         $st->execute([$id]);
         $slip = $st->fetch();
         if (!$slip) jsonError('Payslip not found.', 404);
         if ($slip['status'] !== 'pending') jsonError('Only pending payslips can be declined.');
+        if ($slip['payroll_batch_id'] !== null) jsonError('This payslip belongs to a batch. Review and decide the entire batch from Approve Payroll.', 409);
 
         $remarks = $body['remarks'] ?? 'Declined by chairman';
         $db->prepare('UPDATE payslips SET status="declined", approved_by=?, approved_at=NOW(), remarks=? WHERE id=?')
@@ -531,105 +421,119 @@ switch ($action) {
     }
 
     // --------------------------------------------------------
-    //  GET ?action=thirteenth-month-preview
-    //  Params: employeeUserId, year
+    //  GET ?action=thirteenth-month-batch-preview&year=YYYY
     // --------------------------------------------------------
-    case 'thirteenth-month-preview': {
+    case 'thirteenth-month-batch-preview': {
         $user = requirePermission('generatePayslips');
-        $empUserId = (int)($_GET['employeeUserId'] ?? 0);
-        $year      = (int)($_GET['year'] ?? date('Y'));
-        if (!$empUserId) jsonError('employeeUserId required.');
-
+        $year = (int)($_GET['year'] ?? date('Y'));
+        if ($year < 2000 || $year > (int)date('Y')) jsonError('Choose a valid calendar year.');
         $db = getDB();
-        $st = $db->prepare('SELECT full_name FROM users WHERE id=? LIMIT 1');
-        $st->execute([$empUserId]);
-        $emp = $st->fetch();
-        if (!$emp) jsonError('Employee not found.', 404);
-
         $st = $db->prepare('
-            SELECT id, pay_period, cutoff_start, cutoff_end, (basic_pay + taxable_leave_pay) AS basic_pay
-            FROM payslips
-            WHERE employee_user_id = ? AND payslip_type = "regular" AND status = "approved"
-              AND cutoff_start IS NOT NULL AND YEAR(cutoff_start) = ?
-            ORDER BY cutoff_start ASC
+            SELECT u.id AS employee_user_id, u.full_name, u.staff_id, e.department, e.employment_type,
+                   COALESCE(earn.total_basic,0) AS total_basic,
+                   COALESCE(earn.pay_count,0) AS approved_pay_count,
+                   (SELECT p.status FROM payslips p WHERE p.employee_user_id=u.id AND p.payslip_type="13th_month" AND p.pay_period=? ORDER BY p.id DESC LIMIT 1) AS existing_status
+            FROM users u
+            JOIN employees e ON e.user_id=u.id
+            JOIN (
+                SELECT employee_user_id, SUM(basic_pay + taxable_leave_pay) AS total_basic, COUNT(*) AS pay_count
+                FROM payslips
+                WHERE payslip_type="regular" AND status="approved" AND cutoff_start IS NOT NULL AND YEAR(cutoff_start)=?
+                GROUP BY employee_user_id
+            ) earn ON earn.employee_user_id=u.id
+            WHERE u.role IN ("employee","manager","chairman","treasurer")
+              AND u.status IN ("active","inactive")
+            ORDER BY u.full_name
         ');
-        $st->execute([$empUserId, $year]);
+        $st->execute(["13th Month Pay $year", $year]);
         $rows = $st->fetchAll();
-
-        $total = 0;
-        foreach ($rows as $r) $total += (float)$r['basic_pay'];
-        $thirteenthMonth = round($total / 12, 2);
-
-        $periodLabel = "13th Month Pay $year";
-        $chk = $db->prepare('SELECT id, status FROM payslips WHERE employee_user_id=? AND payslip_type="13th_month" AND pay_period=? LIMIT 1');
-        $chk->execute([$empUserId, $periodLabel]);
-        $existing = $chk->fetch();
-
+        $included = 0; $excluded = 0; $totalBasic = 0.0; $totalPay = 0.0;
+        foreach ($rows as &$row) {
+            $row['total_basic'] = round((float)$row['total_basic'], 2);
+            $row['thirteenth_month'] = round($row['total_basic'] / 12, 2);
+            $locked = in_array($row['existing_status'], ['pending','approved'], true);
+            $row['can_generate'] = !$locked && $row['thirteenth_month'] > 0;
+            if ($row['can_generate']) { $included++; $totalBasic += $row['total_basic']; $totalPay += $row['thirteenth_month']; }
+            else $excluded++;
+        }
+        unset($row);
+        $batchSt = $db->prepare('SELECT id,status FROM payroll_batches WHERE batch_type="13th_month" AND pay_period=? AND status IN ("pending","approved") ORDER BY id DESC LIMIT 1');
+        $batchSt->execute(["13th Month Pay $year"]);
+        $existingBatch = $batchSt->fetch() ?: null;
         jsonOk([
-            'employeeName'     => $emp['full_name'],
-            'year'             => $year,
-            'payslips'         => $rows,
-            'totalBasicPay'    => round($total, 2),
-            'thirteenthMonth'  => $thirteenthMonth,
-            'alreadyGenerated' => $existing ? $existing['status'] : null,
+            'year' => $year,
+            'employees' => $rows,
+            'eligibleCount' => $included,
+            'excludedCount' => $excluded,
+            'totalBasicPay' => round($totalBasic, 2),
+            'totalThirteenthMonth' => round($totalPay, 2),
+            'existingBatch' => $existingBatch,
         ]);
         break;
     }
 
     // --------------------------------------------------------
-    //  POST ?action=thirteenth-month-generate
-    //  Body: { employeeUserId, year }
+    //  POST ?action=thirteenth-month-batch-generate
+    //  Recalculates from approved regular payslips on the server.
     // --------------------------------------------------------
-    case 'thirteenth-month-generate': {
+    case 'thirteenth-month-batch-generate': {
         $user = requirePermission('generatePayslips');
-        $empUserId = (int)($body['employeeUserId'] ?? 0);
-        $year      = (int)($body['year'] ?? 0);
-        if (!$empUserId || !$year) jsonError('employeeUserId and year are required.');
-
+        $year = (int)($body['year'] ?? 0);
+        if ($year < 2000 || $year > (int)date('Y')) jsonError('Choose a valid calendar year.');
         $db = getDB();
-
-        $chk = $db->prepare('SELECT id FROM users WHERE id=? AND status="active" LIMIT 1');
-        $chk->execute([$empUserId]);
-        if (!$chk->fetch()) jsonError('Employee not found.');
-
         $periodLabel = "13th Month Pay $year";
-
-        $dup = $db->prepare('SELECT id FROM payslips WHERE employee_user_id=? AND payslip_type="13th_month" AND pay_period=? AND status != "declined" LIMIT 1');
-        $dup->execute([$empUserId, $periodLabel]);
-        if ($dup->fetch()) jsonError("A 13th month payslip for $year already exists for this employee.");
-
-        // Recompute server-side - never trust a client-submitted total for money
-        $st = $db->prepare('
-            SELECT (basic_pay + taxable_leave_pay) AS basic_pay FROM payslips
-            WHERE employee_user_id=? AND payslip_type="regular" AND status="approved"
-              AND cutoff_start IS NOT NULL AND YEAR(cutoff_start)=?
-        ');
-        $st->execute([$empUserId, $year]);
-        $total = 0;
-        foreach ($st->fetchAll() as $r) $total += (float)$r['basic_pay'];
-        $thirteenthMonth = round($total / 12, 2);
-
-        if ($thirteenthMonth <= 0) jsonError('No approved payslips found for this employee in ' . $year . '.');
-
-        $etSt = $db->prepare('SELECT employment_type FROM employees WHERE user_id=? LIMIT 1');
-        $etSt->execute([$empUserId]);
-        $et = $etSt->fetchColumn() ?: 'Full-time';
-
-        $db->prepare('
-            INSERT INTO payslips
-              (employee_user_id, pay_period, payslip_type, cutoff_start, cutoff_end, pay_date, employment_type,
-               basic_pay, taxable_allow, non_tax_allow, gross_pay,
-               withholding_tax, sss_gsis, philhealth, pagibig, total_deductions, net_pay,
-               status, generated_by)
-            VALUES (?,?,"13th_month",?,?,?,?,?,0,0,?,0,0,0,0,0,?,"pending",?)
-        ')->execute([
-            $empUserId, $periodLabel, "$year-01-01", "$year-12-31", "$year-12-24", $et,
-            $thirteenthMonth, $thirteenthMonth, $thirteenthMonth, $user['id']
-        ]);
-
-        $newId = $db->lastInsertId();
-        auditLog($user['id'], 'generate_13th_month', 'payslips', "Generated 13th month pay id=$newId for employee=$empUserId, year=$year, amount=$thirteenthMonth");
-        jsonOk(['payslipId' => $newId, 'amount' => $thirteenthMonth], '13th month pay submitted for approval');
+        $db->beginTransaction();
+        try {
+            $batchLock = $db->prepare('SELECT id FROM payroll_batches WHERE batch_type="13th_month" AND pay_period=? AND status IN ("pending","approved") LIMIT 1 FOR UPDATE');
+            $batchLock->execute([$periodLabel]);
+            if ($batchLock->fetch()) {
+                $db->rollBack();
+                jsonError("A 13th-month batch for $year is already pending or approved.", 409);
+            }
+            $st = $db->prepare('
+                SELECT u.id AS employee_user_id, u.full_name, e.employment_type,
+                       SUM(p.basic_pay + p.taxable_leave_pay) AS total_basic,
+                       (SELECT p2.status FROM payslips p2 WHERE p2.employee_user_id=u.id AND p2.payslip_type="13th_month" AND p2.pay_period=? ORDER BY p2.id DESC LIMIT 1) AS existing_status
+                FROM users u
+                JOIN employees e ON e.user_id=u.id
+                JOIN payslips p ON p.employee_user_id=u.id
+                WHERE u.role IN ("employee","manager","chairman","treasurer")
+                  AND u.status IN ("active","inactive")
+                  AND p.payslip_type="regular" AND p.status="approved" AND p.cutoff_start IS NOT NULL AND YEAR(p.cutoff_start)=?
+                GROUP BY u.id,u.full_name,e.employment_type
+                ORDER BY u.id
+            ');
+            $st->execute([$periodLabel, $year]);
+            $employees = $st->fetchAll();
+            $items = [];
+            foreach ($employees as $employee) {
+                if (in_array($employee['existing_status'], ['pending','approved'], true)) continue;
+                $basic = round((float)$employee['total_basic'], 2);
+                $amount = round($basic / 12, 2);
+                if ($amount <= 0) continue;
+                $items[] = ['employee' => $employee, 'basic' => $basic, 'amount' => $amount];
+            }
+            if (!$items) {
+                $db->rollBack();
+                jsonError('No eligible employees with approved payroll records are available for this batch.', 409);
+            }
+            $total = array_sum(array_column($items, 'amount'));
+            $db->prepare('INSERT INTO payroll_batches (batch_type,pay_period,cutoff_start,cutoff_end,pay_date,employee_count,total_gross,total_deductions,total_net,status,generated_by) VALUES ("13th_month",?,?,?,?,?,?,0,?,"pending",?)')
+                ->execute([$periodLabel, "$year-01-01", "$year-12-31", "$year-12-24", count($items), $total, $total, $user['id']]);
+            $batchId = (int)$db->lastInsertId();
+            $insert = $db->prepare('INSERT INTO payslips (employee_user_id,pay_period,payslip_type,payroll_batch_id,cutoff_start,cutoff_end,pay_date,employment_type,basic_pay,thirteenth_month_basis,gross_pay,total_deductions,net_pay,status,generated_by) VALUES (?, ?, "13th_month", ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, "pending", ?)');
+            foreach ($items as $item) {
+                $employee = $item['employee']; $amount = $item['amount'];
+                $insert->execute([$employee['employee_user_id'],$periodLabel,$batchId,"$year-01-01","$year-12-31","$year-12-24",$employee['employment_type'],$amount,$item['basic'],$amount,$amount,$user['id']]);
+            }
+            $db->commit();
+        } catch (Throwable $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            error_log('13th-month batch generation failed: ' . $e->getMessage());
+            jsonError('Could not generate the 13th-month batch. Please try again.', 500);
+        }
+        auditLog($user['id'], 'generate_13th_month_batch', 'payslips', "Generated 13th-month batch id=$batchId for year=$year with " . count($items) . ' employees; total=' . number_format($total, 2, '.', ''));
+        jsonOk(['batchId' => $batchId, 'employeeCount' => count($items), 'total' => round($total, 2)], "13th-month batch for $year submitted for chairman approval.");
         break;
     }
 
@@ -676,7 +580,7 @@ switch ($action) {
         // A payroll batch is ONE persistent entity per cutoff. If one already
         // exists for this exact cutoff, we either block or regenerate it in
         // place - we never create a second entity for the same period.
-        $existingSt = $db->prepare('SELECT id, status FROM payroll_batches WHERE cutoff_start=? AND cutoff_end=? LIMIT 1');
+        $existingSt = $db->prepare('SELECT id, status FROM payroll_batches WHERE batch_type="regular" AND cutoff_start=? AND cutoff_end=? LIMIT 1');
         $existingSt->execute([$cutoffStart, $cutoffEnd]);
         $existingBatch = $existingSt->fetch();
 
@@ -829,6 +733,10 @@ switch ($action) {
             $where[] = 'pb.status = ?';
             $params[] = $_GET['status'];
         }
+        if (!empty($_GET['batchType']) && in_array($_GET['batchType'], ['regular','13th_month'], true)) {
+            $where[] = 'pb.batch_type = ?';
+            $params[] = $_GET['batchType'];
+        }
 
         $st = $db->prepare('
             SELECT pb.*, g.full_name AS generated_by_name, a.full_name AS approved_by_name,
@@ -902,26 +810,40 @@ switch ($action) {
         if (!$id) jsonError('Batch ID required.');
         $db = getDB();
 
-        $st = $db->prepare('SELECT id,status,generated_by,pay_period,cutoff_start,cutoff_end,pay_date FROM payroll_batches WHERE id=? LIMIT 1');
+        $st = $db->prepare('SELECT id,batch_type,status,generated_by,pay_period,cutoff_start,cutoff_end,pay_date FROM payroll_batches WHERE id=? LIMIT 1');
         $st->execute([$id]);
         $batch = $st->fetch();
         if (!$batch) jsonError('Payroll batch not found.', 404);
         if ($batch['status'] !== 'pending') jsonError('This payroll batch is already ' . $batch['status'] . '.');
 
-        $expectedPayDate = scheduledPayDateForCutoff($batch['pay_period'], $batch['cutoff_start'], $batch['cutoff_end']);
-        if ($expectedPayDate === null || $batch['pay_date'] !== $expectedPayDate) {
-            jsonError('This batch does not follow the current cutoff and payday schedule. Decline it and generate a new batch.', 409);
-        }
-
-        $overlap = findOverlappingPayrollBatch($db, $batch['cutoff_start'], $batch['cutoff_end'], $id, true);
-        if ($overlap) {
-            jsonError("Cannot approve this batch: payroll batch #{$overlap['id']} already covers {$overlap['cutoff_start']} to {$overlap['cutoff_end']}.", 409);
-        }
-
-        $overlapSt = $db->prepare('SELECT p.id,p.cutoff_start,p.cutoff_end FROM payslips p JOIN payslips current_slip ON current_slip.employee_user_id=p.employee_user_id AND current_slip.payroll_batch_id=? WHERE p.payslip_type="regular" AND p.status="approved" AND p.cutoff_start<=current_slip.cutoff_end AND p.cutoff_end>=current_slip.cutoff_start AND (p.payroll_batch_id IS NULL OR p.payroll_batch_id!=?) LIMIT 1');
-        $overlapSt->execute([$id, $id]);
-        if ($overlap = $overlapSt->fetch()) {
-            jsonError("Cannot approve this batch: approved payslip #{$overlap['id']} already covers {$overlap['cutoff_start']} to {$overlap['cutoff_end']}.", 409);
+        if ($batch['batch_type'] === 'regular') {
+            $expectedPayDate = scheduledPayDateForCutoff($batch['pay_period'], $batch['cutoff_start'], $batch['cutoff_end']);
+            if ($expectedPayDate === null || $batch['pay_date'] !== $expectedPayDate) {
+                jsonError('This batch does not follow the current cutoff and payday schedule. Decline it and generate a new batch.', 409);
+            }
+            $overlap = findOverlappingPayrollBatch($db, $batch['cutoff_start'], $batch['cutoff_end'], $id, true);
+            if ($overlap) {
+                jsonError("Cannot approve this batch: payroll batch #{$overlap['id']} already covers {$overlap['cutoff_start']} to {$overlap['cutoff_end']}.", 409);
+            }
+            $overlapSt = $db->prepare('SELECT p.id,p.cutoff_start,p.cutoff_end FROM payslips p JOIN payslips current_slip ON current_slip.employee_user_id=p.employee_user_id AND current_slip.payroll_batch_id=? WHERE p.payslip_type="regular" AND p.status="approved" AND p.cutoff_start<=current_slip.cutoff_end AND p.cutoff_end>=current_slip.cutoff_start AND (p.payroll_batch_id IS NULL OR p.payroll_batch_id!=?) LIMIT 1');
+            $overlapSt->execute([$id, $id]);
+            if ($overlap = $overlapSt->fetch()) {
+                jsonError("Cannot approve this batch: approved payslip #{$overlap['id']} already covers {$overlap['cutoff_start']} to {$overlap['cutoff_end']}.", 409);
+            }
+        } elseif ($batch['batch_type'] === '13th_month') {
+            $expectedStart = substr($batch['pay_period'], -4) . '-01-01';
+            $expectedEnd = substr($batch['pay_period'], -4) . '-12-31';
+            $expectedPayDate = substr($batch['pay_period'], -4) . '-12-24';
+            if ($batch['cutoff_start'] !== $expectedStart || $batch['cutoff_end'] !== $expectedEnd || $batch['pay_date'] !== $expectedPayDate) {
+                jsonError('This annual batch has inconsistent year or payment dates.', 409);
+            }
+            $countSt = $db->prepare('SELECT COUNT(*) FROM payslips WHERE payroll_batch_id=? AND payslip_type="13th_month" AND status="pending"');
+            $countSt->execute([$id]);
+        if ((int)$countSt->fetchColumn() !== (int)$db->query('SELECT employee_count FROM payroll_batches WHERE id=' . (int)$id)->fetchColumn()) {
+                jsonError('This annual batch is incomplete. Decline it and regenerate it.', 409);
+            }
+        } else {
+            jsonError('Unknown payroll batch type.', 409);
         }
 
         $empSt = $db->prepare('SELECT employee_user_id FROM payslips WHERE payroll_batch_id=? AND status="pending"');

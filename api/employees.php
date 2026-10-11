@@ -73,59 +73,34 @@ switch ($action) {
 
     // --------------------------------------------------------
     //  POST ?action=create  (manager only)
-    //  Body: firstName, lastName, department, position,
-    //        employmentType, salary, phone, hireDate, email
+    //  Body: email, department, position, employmentType, salary/hourlyRate
     // --------------------------------------------------------
     case 'create': {
         $user = requirePermission('createEditEmployees');
 
-        $required = ['firstName','lastName','department','position','email'];
+        $required = ['department','position','employmentType','email'];
         foreach ($required as $f) {
             if (empty($body[$f])) jsonError("Field '$f' is required.");
         }
 
-        $firstName  = trim($body['firstName']);
-        $lastName   = trim($body['lastName']);
         $department = trim($body['department']);
         $position   = trim($body['position']);
-        $empType    = $body['employmentType'] ?? 'Full-time';
-        $salary     = (float)($body['salary']  ?? 0);
+        $empType    = $body['employmentType'];
+        $salary     = (float)($body['salary'] ?? 0);
         $hourlyRate = (float)($body['hourlyRate'] ?? 0);
-        $phone      = trim($body['phone']      ?? '');
-        $address    = trim($body['address']    ?? '');
-        $emName     = trim($body['emergencyContactName']  ?? '');
-        $emPhone    = trim($body['emergencyContactPhone'] ?? '');
-        $sssOn      = isset($body['sssEnabled'])       && $body['sssEnabled']       ? 1 : 0;
-        $philOn     = isset($body['philhealthEnabled']) && $body['philhealthEnabled'] ? 1 : 0;
-        $pagOn      = isset($body['pagibigEnabled'])   && $body['pagibigEnabled']   ? 1 : 0;
-        $hireDate   = $body['hireDate']         ?? null;
+        if (!in_array($empType, ['Full-time','Part-time'], true)) jsonError('Select a valid employment type.');
+        if ($empType === 'Full-time' && $salary <= 0) jsonError('Enter a salary greater than zero.');
+        if ($empType === 'Part-time' && $hourlyRate <= 0) jsonError('Enter an hourly rate greater than zero.');
         $emailInput = $body['email'];
         if (!is_string($emailInput) || strlen($emailInput) > 150) jsonError('Enter a valid email address.');
         $email = trim($emailInput);
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) jsonError('Enter a valid email address.');
-        $gender = $body['gender'] ?? '';
-        $maritalStatus = $body['maritalStatus'] ?? '';
-        $cohabiting = $body['cohabitingWithSpouse'] ?? null;
-        if (!in_array($gender, ['male','female','other','prefer_not_to_say'], true)) jsonError('Select a valid gender option.');
-        if (!in_array($maritalStatus, ['single','married','separated','widowed','other'], true)) jsonError('Select a valid marital status.');
-        if ($maritalStatus === 'married' && !in_array((string)$cohabiting, ['0','1'], true)) jsonError('Select whether the employee lives together with their spouse.');
-        if ($maritalStatus !== 'married') $cohabiting = null;
-
-        $govSss        = trim($body['govSss']        ?? '');
-        $govPhilhealth = trim($body['govPhilhealth'] ?? '');
-        $govPagibig    = trim($body['govPagibig']    ?? '');
-        if ($govSss !== ''        && !preg_match('/^\d{10}$/', $govSss))        jsonError('SSS number must be exactly 10 digits.');
-        if ($govPhilhealth !== '' && !preg_match('/^\d{12}$/', $govPhilhealth)) jsonError('PhilHealth number must be exactly 12 digits.');
-        if ($govPagibig !== ''    && !preg_match('/^\d{12}$/', $govPagibig))    jsonError('Pag-IBIG number must be exactly 12 digits.');
-        if ($phone !== '' && !preg_match('/^\d{11}$/', $phone)) jsonError('Phone number must be exactly 11 digits.');
-
         $db = getDB();
 
         $chk = $db->prepare('SELECT id FROM users WHERE email = ? LIMIT 1');
         $chk->execute([$email]);
         if ($chk->fetch()) jsonError('An account with that email already exists.');
 
-        // Generate staff ID  EMP + zero-padded count
         $cnt = (int)$db->query('SELECT COUNT(*) FROM users WHERE role="employee"')->fetchColumn();
         $staffIdCheck = $db->prepare('SELECT id FROM users WHERE staff_id=? LIMIT 1');
         do {
@@ -137,12 +112,10 @@ switch ($action) {
         $db->beginTransaction();
         try {
             $db->prepare('INSERT INTO users (full_name,email,role,staff_id,department,status) VALUES (?,?,?,?,?,"pending")')
-               ->execute(["$firstName $lastName", $email, 'employee', $staffId, $department]);
+               ->execute(['Registration pending', $email, 'employee', $staffId, $department]);
             $newUserId = (int)$db->lastInsertId();
-
-            $db->prepare('INSERT INTO employees (user_id,first_name,last_name,gender,marital_status,cohabiting_with_spouse,department,position,employment_type,basic_salary,hourly_rate,phone,address,emergency_contact_name,emergency_contact_phone,sss_enabled,philhealth_enabled,pagibig_enabled,gov_sss,gov_philhealth,gov_pagibig,hire_date,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
-               ->execute([$newUserId, $firstName, $lastName, $gender, $maritalStatus, $cohabiting, $department, $position, $empType, $salary, $hourlyRate, $phone, $address, $emName, $emPhone, $sssOn, $philOn, $pagOn, $govSss ?: null, $govPhilhealth ?: null, $govPagibig ?: null, $hireDate ?: null, $user['id']]);
-
+            $db->prepare('INSERT INTO employees (user_id,first_name,last_name,department,position,employment_type,basic_salary,hourly_rate,hire_date,created_by) VALUES (?,?,?,?,?,?,?,?,CURRENT_DATE(),?)')
+               ->execute([$newUserId, '', '', $department, $position, $empType, $empType === 'Full-time' ? $salary : 0, $empType === 'Part-time' ? $hourlyRate : 0, $user['id']]);
             $db->commit();
         } catch (\Throwable $e) {
             $db->rollBack();
@@ -150,8 +123,8 @@ switch ($action) {
             jsonError('Could not create the employee. Please check the information and try again.', 500);
         }
 
-        $invitationSent = sendRegistrationInvite($db, ['id' => $newUserId, 'full_name' => "$firstName $lastName", 'email' => $email]);
-        auditLog($user['id'], 'create_employee', 'employees', "Created pending employee $firstName $lastName (staff: $staffId), invitation sent=" . ($invitationSent ? 'yes' : 'no'));
+        $invitationSent = sendRegistrationInvite($db, ['id' => $newUserId, 'full_name' => 'New employee', 'email' => $email]);
+        auditLog($user['id'], 'create_employee', 'employees', "Created pending employee invitation for $email (staff: $staffId), invitation sent=" . ($invitationSent ? 'yes' : 'no'));
         jsonOk(['staffId' => $staffId, 'userId' => $newUserId, 'invitationSent' => $invitationSent],
             $invitationSent ? 'Employee created and registration link emailed.' : 'Employee created, but the registration email could not be sent. Use Resend Invitation from the employee list.');
         break;

@@ -26,11 +26,11 @@ async function loadGeneratePayslip(c) {
 // ============================================================
 function loadGeneratePayroll(c) {
     const now = new Date();
-    let monthOptions = '<option value="">-- Select Month --</option>';
+    let monthOptions = '';
     for (let i = 0; i < 12; i++) {
         const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
         const value = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-        monthOptions += `<option value="${value}">${d.toLocaleDateString('en-US',{year:'numeric',month:'long'})}</option>`;
+        monthOptions += `<option value="${value}"${i === 0 ? ' selected' : ''}>${d.toLocaleDateString('en-US',{year:'numeric',month:'long'})}</option>`;
     }
 
     c.innerHTML = `<div class="card"><div class="card-header"><div class="card-title"><i class="fas fa-people-group"></i>Generate Payroll</div></div>
@@ -67,7 +67,7 @@ function prToggleCutoff() {
 async function prLoadNeedsRevision() {
     const el = document.getElementById('prNeedsRevision');
     if (!el) return;
-    const data = await apiCall(`${API.PAYSLIPS}?action=payroll-batches&status=declined`);
+    const data = await apiCall(`${API.PAYSLIPS}?action=payroll-batches&status=declined&batchType=regular`);
     if (!data.success || !data.batches.length) { el.innerHTML = ''; return; }
     el.innerHTML = `
         <div style="font-weight:700;font-size:0.95rem;color:var(--danger);margin-bottom:0.75rem;border-bottom:2px solid #fde2e2;padding-bottom:0.5rem;"><i class="fas fa-rotate-left"></i> Needs Revision</div>
@@ -172,11 +172,17 @@ async function prGenerate() {
 // ============================================================
 //  APPROVE PAYROLL (chairman, batch)
 // ============================================================
+function payrollBatchPeriodText(batch) {
+    return batch.batch_type === '13th_month'
+        ? `13th Month Pay ${String(batch.pay_period).slice(-4)}`
+        : `${batch.cutoff_start} to ${batch.cutoff_end}`;
+}
+
 async function loadApprovePayroll(c) {
     c.innerHTML = `<div class="card"><div class="card-header"><div class="card-title"><i class="fas fa-people-group"></i>Approve Payroll</div></div>
         <div style="padding:1.4rem;">
         <div class="alert alert-info"><i class="fas fa-info-circle"></i><div>Review a payroll batch, then approve or decline it for everyone included at once.</div></div>
-        <div class="table-container"><table><thead><tr><th>Cutoff</th><th>Employees</th><th>Total Gross</th><th>Total Net</th><th>Submitted By</th><th>Date</th><th>Actions</th></tr></thead><tbody id="apPayrollBody"><tr><td colspan="7" style="text-align:center;padding:2rem;color:var(--text-light);">Loading...</td></tr></tbody></table></div>
+        <div class="table-container"><table><thead><tr><th>Cutoff / Annual Period</th><th>Employees</th><th>Total Gross</th><th>Total Net</th><th>Submitted By</th><th>Date</th><th>Actions</th></tr></thead><tbody id="apPayrollBody"><tr><td colspan="7" style="text-align:center;padding:2rem;color:var(--text-light);">Loading...</td></tr></tbody></table></div>
         </div></div>`;
 
     const data = await apiCall(`${API.PAYSLIPS}?action=payroll-batches-pending`);
@@ -186,7 +192,7 @@ async function loadApprovePayroll(c) {
         return;
     }
     tbody.innerHTML = data.batches.map(b => `<tr>
-        <td>${escapeHtml(b.cutoff_start)} to ${escapeHtml(b.cutoff_end)}</td>
+        <td>${escapeHtml(payrollBatchPeriodText(b))}</td>
         <td>${b.employee_count}</td>
         <td>${peso(b.total_gross)}</td>
         <td><strong>${peso(b.total_net)}</strong></td>
@@ -209,18 +215,19 @@ async function openPayrollBatchDetail(id, showActions) {
     const sc = b.status==='approved'?'status-completed':b.status==='declined'?'status-rejected':'status-pending';
 
     const canViewPayslips = b.status !== 'pending'; // payslips only "real" once decided
-    payrollBatchMeta = { id, canViewPayslips };
+    const isAnnual = b.batch_type === '13th_month';
+    payrollBatchMeta = { id, canViewPayslips, isAnnual };
     const totalGross = data.payslips.reduce((s,p)=>s+parseFloat(p.gross_pay),0);
     const totalNet    = data.payslips.reduce((s,p)=>s+parseFloat(p.net_pay),0);
     const totalUnpaidDeductions = data.payslips.reduce((s,p)=>s+parseFloat(p.unpaid_deduction_amount || 0),0);
 
     document.getElementById('payrollBatchDetail').innerHTML = `
         <div class="payslip-doc-grid" style="margin-bottom:1rem;">
-            <div><span>Cutoff: </span><strong>${escapeHtml(b.cutoff_start)} to ${escapeHtml(b.cutoff_end)}</strong></div>
+            <div><span>${isAnnual ? 'Annual period: ' : 'Cutoff: '}</span><strong>${escapeHtml(payrollBatchPeriodText(b))}</strong></div>
             <div><span>Pay Date: </span><strong>${escapeHtml(b.pay_date || '—')}</strong></div>
             <div><span>Submitted By: </span><strong>${escapeHtml(b.generated_by_name)}</strong></div>
             <div><span>Total Net: </span><strong>${peso(b.total_net)}</strong></div>
-            <div><span>Uncollected deductions (not carried forward): </span><strong>${peso(totalUnpaidDeductions)}</strong></div>
+            ${isAnnual ? '' : `<div><span>Uncollected deductions (not carried forward): </span><strong>${peso(totalUnpaidDeductions)}</strong></div>`}
             <div><span>Status: </span><strong><span class="status ${sc}">${b.status.charAt(0).toUpperCase()+b.status.slice(1)}</span></strong></div>
             <div><span>Decided By: </span><strong>${escapeHtml(b.approved_by_name || '—')}</strong></div>
         </div>
@@ -230,17 +237,20 @@ async function openPayrollBatchDetail(id, showActions) {
             <div class="form-col" style="max-width:220px;"><select class="form-control" id="pbdDeptFilter" onchange="renderPayrollBatchTable()"><option value="">All Departments</option></select></div>
         </div>
         <div class="table-container"><table><thead>
-            <tr><th rowspan="2">ID</th><th rowspan="2">Name</th><th rowspan="2">Department</th><th rowspan="2">Type</th><th rowspan="2">Rate/hr</th><th rowspan="2">Hours Rendered</th><th rowspan="2">Gross</th><th colspan="3">Calculated deductions</th><th rowspan="2">Uncollected</th><th rowspan="2">Net Pay</th>${canViewPayslips ? '<th rowspan="2">Actions</th>' : ''}</tr>
-            <tr><th>SSS</th><th>Pag-IBIG</th><th>PhilHealth</th></tr>
+            ${isAnnual
+                ? `<tr><th>Staff ID</th><th>Employee</th><th>Department</th><th>Approved basic pay</th><th>13th-month pay</th>${canViewPayslips ? '<th>Actions</th>' : ''}</tr>`
+                : `<tr><th rowspan="2">ID</th><th rowspan="2">Name</th><th rowspan="2">Department</th><th rowspan="2">Type</th><th rowspan="2">Rate/hr</th><th rowspan="2">Hours Rendered</th><th rowspan="2">Gross</th><th colspan="3">Calculated deductions</th><th rowspan="2">Uncollected</th><th rowspan="2">Net Pay</th>${canViewPayslips ? '<th rowspan="2">Actions</th>' : ''}</tr><tr><th>SSS</th><th>Pag-IBIG</th><th>PhilHealth</th></tr>`}
         </thead>
         <tbody id="pbdBody"></tbody>
-        <tfoot><tr class="total-row"><td colspan="6"><strong>Total (all ${data.payslips.length})</strong></td><td><strong>${peso(totalGross)}</strong></td><td colspan="3"></td><td><strong>${peso(totalUnpaidDeductions)}</strong></td><td><strong>${peso(totalNet)}</strong></td>${canViewPayslips ? '<td></td>' : ''}</tr></tfoot>
+        <tfoot><tr class="total-row">${isAnnual
+            ? `<td colspan="3"><strong>Total (${data.payslips.length} employees)</strong></td><td><strong>${peso(data.payslips.reduce((s,p)=>s+parseFloat(p.thirteenth_month_basis || 0),0))}</strong></td><td><strong>${peso(totalNet)}</strong></td>${canViewPayslips ? '<td></td>' : ''}`
+            : `<td colspan="6"><strong>Total (all ${data.payslips.length})</strong></td><td><strong>${peso(totalGross)}</strong></td><td colspan="3"></td><td><strong>${peso(totalUnpaidDeductions)}</strong></td><td><strong>${peso(totalNet)}</strong></td>${canViewPayslips ? '<td></td>' : ''}`}</tr></tfoot>
         </table></div>
         <div class="pager" id="pbdPager"></div>
         ${showActions ? `
         <div style="display:flex;gap:0.75rem;justify-content:flex-end;margin-top:1.25rem;">
             <button class="action-btn danger" onclick="apDecideBatch(${id}, 'decline')"><i class="fas fa-rotate-left"></i> Send Back for Revision</button>
-            <button class="action-btn" style="background:var(--success);" onclick="apDecideBatch(${id}, 'approve')"><i class="fas fa-check"></i> Approve Payroll</button>
+            <button class="action-btn" style="background:var(--success);" onclick="apDecideBatch(${id}, 'approve')"><i class="fas fa-check"></i> ${isAnnual ? 'Approve 13th-Month Batch' : 'Approve Payroll'}</button>
         </div>` : ''}
     `;
 
@@ -264,6 +274,7 @@ function renderPayrollBatchTable() {
     const term = (document.getElementById('pbdSearch')?.value || '').trim().toLowerCase();
     const dept = document.getElementById('pbdDeptFilter')?.value || '';
     const canViewPayslips = payrollBatchMeta.canViewPayslips;
+    const isAnnual = payrollBatchMeta.isAnnual;
 
     const filtered = payrollBatchEmployees.filter(p => {
         if (dept && p.department !== dept) return false;
@@ -275,12 +286,16 @@ function renderPayrollBatchTable() {
     });
 
     if (!filtered.length) {
-        tbody.innerHTML = `<tr><td colspan="${canViewPayslips?13:12}" style="text-align:center;padding:2rem;color:var(--text-light);">No employees match your filters.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="${isAnnual ? (canViewPayslips ? 6 : 5) : (canViewPayslips?13:12)}" style="text-align:center;padding:2rem;color:var(--text-light);">No employees match your filters.</td></tr>`;
         document.getElementById('pbdPager').innerHTML = '';
         return;
     }
 
-    const rows = filtered.map(p => `<tr>
+    const rows = filtered.map(p => isAnnual ? `<tr>
+        <td>${escapeHtml(p.staff_id)}</td><td>${escapeHtml(p.employee_name)}</td><td>${escapeHtml(p.department || '—')}</td>
+        <td>${peso(p.thirteenth_month_basis)}</td><td><strong>${peso(p.net_pay)}</strong></td>
+        ${canViewPayslips ? `<td><button class="action-btn btn-sm" onclick="viewPayslipDoc(${p.id})"><i class="fas fa-eye"></i> View Payslip</button></td>` : ''}
+    </tr>` : `<tr>
         <td>${escapeHtml(p.staff_id)}</td>
         <td>${escapeHtml(p.employee_name)}</td>
         <td>${escapeHtml(p.department || '—')}</td>
@@ -313,9 +328,11 @@ async function apDecideBatch(id, decision) {
         remarks = confirmResult.remarks;
     } else {
         const confirmResult = await showAppConfirm({
-            title: 'Approve Payroll',
-            message: 'Approve this ENTIRE payroll batch? Every payslip in it will be marked approved.',
-            confirmLabel: 'Approve',
+            title: payrollBatchMeta.isAnnual ? 'Approve 13th-Month Batch' : 'Approve Payroll',
+            message: payrollBatchMeta.isAnnual
+                ? 'Approve this entire annual 13th-month batch? Every included employee payslip will be approved together.'
+                : 'Approve this ENTIRE payroll batch? Every payslip in it will be marked approved.',
+            confirmLabel: payrollBatchMeta.isAnnual ? 'Approve Annual Batch' : 'Approve',
         });
         if (!confirmResult.confirmed) return;
     }
@@ -336,67 +353,47 @@ function loadThirteenthMonth(c) {
 
     c.innerHTML = `<div class="card"><div class="card-header"><div class="card-title"><i class="fas fa-gift"></i>13th Month Pay</div></div>
         <div style="padding:1.4rem;">
-        <div class="alert alert-info"><i class="fas fa-info-circle"></i><div>13th Month Pay = (Total Basic Salary Earned in the Year, from approved payslips) ÷ 12. No tax or other deductions apply.</div></div>
+        <div class="alert alert-info"><i class="fas fa-info-circle"></i><div>Preview and submit one annual batch for chairman approval. Amounts use approved regular payslips for the selected calendar year. Confirm payroll records and employee eligibility before submitting.</div></div>
         <div class="form-row" style="margin-bottom:1rem;">
-            <div class="form-col"><div class="form-group"><label>Employee</label><select id="tmEmpSelect" class="form-control"><option value="">Loading employees...</option></select></div></div>
             <div class="form-col"><div class="form-group"><label>Year</label><select id="tmYearSelect" class="form-control">${yearOptions}</select></div></div>
-            <div class="form-col" style="display:flex;align-items:flex-end;"><button class="btn" style="width:100%;" onclick="tmPreview()"><i class="fas fa-calculator"></i> Preview</button></div>
+            <div class="form-col" style="display:flex;align-items:flex-end;"><button class="btn" style="width:100%;" onclick="tmPreview()"><i class="fas fa-calculator"></i> Preview Annual Batch</button></div>
         </div>
         <div id="tmResult"></div>
         </div></div>`;
-    tmLoadEmployees();
-}
-
-async function tmLoadEmployees() {
-    const sel = document.getElementById('tmEmpSelect');
-    const data = await apiCall(`${API.EMP}?action=list`);
-    if (data.success && data.employees.length) {
-        sel.innerHTML = data.employees.map(e => `<option value="${Number(e.id)}">${escapeHtml(e.full_name)}</option>`).join('');
-    } else {
-        sel.innerHTML = '<option value="">No employees found</option>';
-    }
 }
 
 async function tmPreview() {
-    const empId = document.getElementById('tmEmpSelect').value;
     const year  = document.getElementById('tmYearSelect').value;
     const resultEl = document.getElementById('tmResult');
-    if (!empId) { alert('Please select an employee.'); return; }
-
     resultEl.innerHTML = '<div style="text-align:center;padding:1.5rem;color:var(--text-light);">Computing...</div>';
-    const data = await apiCall(`${API.PAYSLIPS}?action=thirteenth-month-preview&employeeUserId=${empId}&year=${year}`);
+    const data = await apiCall(`${API.PAYSLIPS}?action=thirteenth-month-batch-preview&year=${year}`);
     if (!data.success) { resultEl.innerHTML = `<div class="alert alert-info">${escapeHtml(data.message)}</div>`; return; }
-
-    if (data.alreadyGenerated) {
-        resultEl.innerHTML = `<div class="alert alert-info">A 13th month payslip for ${year} already exists for ${escapeHtml(data.employeeName)} (status: ${escapeHtml(data.alreadyGenerated)}). Check Payroll History.</div>`;
-        return;
-    }
-
-    if (!data.payslips.length) {
-        resultEl.innerHTML = `<div class="alert alert-info">No approved payslips found for ${escapeHtml(data.employeeName)} in ${year}. Nothing to compute yet.</div>`;
-        return;
-    }
-
+    const blocked = data.existingBatch;
+    const rows = data.employees.map(e => `<tr>
+        <td>${escapeHtml(e.staff_id)}</td><td>${escapeHtml(e.full_name)}</td><td>${escapeHtml(e.department || '—')}</td>
+        <td style="text-align:right;">${peso(e.total_basic)}</td><td style="text-align:right;">${peso(e.thirteenth_month)}</td>
+        <td>${e.can_generate ? 'Ready' : escapeHtml(e.existing_status || 'No eligible approved pay')}</td>
+    </tr>`).join('');
     resultEl.innerHTML = `
-        <div class="table-container"><table><thead><tr><th>Cutoff</th><th style="text-align:right;">Basic Pay Earned</th></tr></thead>
-        <tbody>${data.payslips.map(p => `<tr><td>${escapeHtml(p.pay_period)}${p.cutoff_start?` (${escapeHtml(p.cutoff_start)} to ${escapeHtml(p.cutoff_end)})`:''}</td><td style="text-align:right;">${peso(p.basic_pay)}</td></tr>`).join('')}</tbody>
-        <tfoot><tr class="total-row"><td><strong>Total Basic Salary Earned (${year})</strong></td><td style="text-align:right;"><strong>${peso(data.totalBasicPay)}</strong></td></tr></tfoot></table></div>
-        <div class="payslip-net" style="margin-top:1rem;">13th Month Pay: ${peso(data.thirteenthMonth)}</div>
-        <button class="btn" style="margin-top:1rem;" onclick="tmGenerate(${empId}, ${year})"><i class="fas fa-paper-plane"></i> Submit for Chairman Approval</button>
+        ${blocked ? `<div class="alert alert-info">A ${year} 13th-month batch is already ${escapeHtml(blocked.status)}. View it in Payroll History.</div>` : ''}
+        <div class="table-container"><table><thead><tr><th>Staff ID</th><th>Employee</th><th>Department</th><th style="text-align:right;">Approved basic pay for year</th><th style="text-align:right;">Calculated 13th-month pay</th><th>Status</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="6" style="text-align:center;padding:1.5rem;">No approved payroll records found for this year.</td></tr>'}</tbody>
+        <tfoot><tr class="total-row"><td colspan="3"><strong>Batch total (${data.eligibleCount} employee(s) included)</strong></td><td style="text-align:right;"><strong>${peso(data.totalBasicPay)}</strong></td><td style="text-align:right;"><strong>${peso(data.totalThirteenthMonth)}</strong></td><td>${data.excludedCount} excluded</td></tr></tfoot></table></div>
+        ${data.eligibleCount && !blocked ? `<button class="btn" style="margin-top:1rem;" onclick="tmGenerate(${year})"><i class="fas fa-paper-plane"></i> Submit Annual Batch for Approval</button>` : ''}
     `;
 }
 
-async function tmGenerate(empId, year) {
+async function tmGenerate(year) {
     const confirmResult = await showAppConfirm({
-        title: '13th Month Pay',
-        message: 'Submit 13th month pay for approval? This cannot be edited once submitted.',
+        title: 'Submit 13th-Month Batch',
+        message: `Submit the ${year} 13th-month batch for the employees shown in the preview for chairman approval? The batch will be calculated again from approved payroll records.`,
         confirmLabel: 'Submit',
     });
     if (!confirmResult.confirmed) return;
 
-    const data = await apiCall(`${API.PAYSLIPS}?action=thirteenth-month-generate`, 'POST', { employeeUserId: empId, year });
+    const data = await apiCall(`${API.PAYSLIPS}?action=thirteenth-month-batch-generate`, 'POST', { year });
     if (data.success) {
-        showToast(`13th month pay of ${peso(data.amount)} submitted for chairman approval.`);
+        showToast(data.message || 'Annual batch submitted for approval.');
         tmPreview();
     } else {
         showToast(data.message, 'error');
@@ -408,7 +405,7 @@ async function refreshPayslipTable() {
     if (!tbody) return;
     const data = await apiCall(`${API.PAYSLIPS}?action=list`);
     if (!data.success || !data.payslips.length) {
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:2rem;color:var(--text-light);">No payslips yet. Generate one using the button above.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:2rem;color:var(--text-light);">No payslips have been generated yet.</td></tr>';
         document.getElementById('payslipPager').innerHTML = '';
         return;
     }
@@ -703,7 +700,7 @@ async function loadPayrollHistory(c) {
             <div class="form-col"><div class="form-group"><label>Month</label><select id="phMonthFilter" class="form-control" onchange="fetchPayrollHistory()">${monthOpts}</select></div></div>
             <div class="form-col"><div class="form-group"><label>Year</label><select id="phYearFilter" class="form-control" onchange="fetchPayrollHistory()">${yearOpts}</select></div></div>
         </div>
-        <div class="table-container"><table><thead><tr><th>Cutoff</th><th>Employees</th><th>Total Gross</th><th>Calculated Deductions</th><th>Uncollected</th><th>Total Net</th><th>Status</th><th>Decided By</th><th>Actions</th></tr></thead><tbody id="payrollHistBody"><tr><td colspan="9" style="text-align:center;padding:2rem;color:var(--text-light);">Loading...</td></tr></tbody></table></div>
+        <div class="table-container"><table><thead><tr><th>Cutoff / Annual Period</th><th>Employees</th><th>Total Gross</th><th>Calculated Deductions</th><th>Uncollected</th><th>Total Net</th><th>Status</th><th>Decided By</th><th>Actions</th></tr></thead><tbody id="payrollHistBody"><tr><td colspan="9" style="text-align:center;padding:2rem;color:var(--text-light);">Loading...</td></tr></table></div>
         <div class="pager" id="payrollHistPager"></div>
         </div></div>`;
     await fetchPayrollHistory();
@@ -725,7 +722,7 @@ async function fetchPayrollHistory() {
     const rows = data.batches.map(b => {
         const sc = b.status==='approved'?'status-completed':b.status==='declined'?'status-rejected':'status-pending';
         return `<tr>
-        <td>${escapeHtml(b.cutoff_start)} to ${escapeHtml(b.cutoff_end)}</td>
+        <td>${escapeHtml(payrollBatchPeriodText(b))}</td>
             <td>${b.employee_count}</td>
             <td>${peso(b.total_gross)}</td>
             <td>${peso(b.total_deductions)}</td>
@@ -800,7 +797,7 @@ async function viewPayslipDoc(id) {
     const ci = await getCompanyInfo();
     document.getElementById('payslipViewDocPreview').innerHTML = `
         <div class="payslip-doc-header"><h2>${escapeHtml(ci.company_name || 'TRAFECO COMPANY')}</h2><p>${escapeHtml(ci.company_address || 'Payroll & Employee Management System')}</p></div>
-        <div class="payslip-doc-title">PAYSLIP</div>
+        <div class="payslip-doc-title">${isRegular ? 'PAYSLIP' : '13TH MONTH PAYSLIP'}</div>
         <div class="payslip-doc-grid" style="margin-top:1rem;">
             <div><span>Employee Name: </span><strong>${escapeHtml(p.employee_name)}</strong></div>
             <div><span>${isRegular ? 'Cutoff: ' : 'Period: '}</span><strong>${isRegular && p.cutoff_start ? `${escapeHtml(p.cutoff_start)} to ${escapeHtml(p.cutoff_end)}` : escapeHtml(p.pay_period)}</strong></div>
@@ -819,7 +816,8 @@ async function viewPayslipDoc(id) {
         </tr></tbody></table>` : ''}
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:1rem;">
             <table class="payslip-earnings-table"><thead><tr><th colspan="2">Earnings</th></tr></thead><tbody>
-                <tr><td>Basic Pay</td><td style="text-align:right;">${peso(p.basic_pay)}</td></tr>
+                <tr><td>${isRegular ? 'Basic Pay' : '13th Month Pay'}</td><td style="text-align:right;">${peso(p.basic_pay)}</td></tr>
+                ${isRegular ? '' : `<tr><td>Basic salary used for calculation</td><td style="text-align:right;">${peso(p.thirteenth_month_basis || 0)}</td></tr>`}
                 <tr><td>Paid Leave Pay</td><td style="text-align:right;">${peso(p.paid_leave_pay || 0)}</td></tr>
                 <tr><td>Taxable Allow.</td><td style="text-align:right;">${peso(p.taxable_allow)}</td></tr>
                 <tr><td>Non-Taxable Allow.</td><td style="text-align:right;">${peso(p.non_tax_allow)}</td></tr>

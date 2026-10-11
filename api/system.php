@@ -176,7 +176,7 @@ switch ($action) {
 
         $allowedSettings = [
             'company_name', 'company_address', 'company_phone', 'company_email',
-            'work_hours_per_day', 'overtime_rate',
+            'work_hours_per_day',
             'archive_after_years', 'auto_archive',
         ];
         foreach (array_keys($body) as $key) {

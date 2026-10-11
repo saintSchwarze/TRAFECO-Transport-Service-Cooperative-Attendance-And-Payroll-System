@@ -381,75 +381,37 @@ function addEmpPopulatePositions() {
 }
 
 function loadAddEmployee(c) {
-    const today = new Date().toISOString().slice(0, 10);
     const deptOptions = Object.keys(DEPT_POSITIONS).map(d => `<option value="${d}">${d}</option>`).join('');
-
     c.innerHTML = `<div class="card"><div class="card-header"><div class="card-title"><i class="fas fa-user-plus"></i>Add New Employee</div></div>
         <div style="padding:1.4rem;">
-        <div class="alert alert-info"><i class="fas fa-info-circle"></i><div>Enter the employee's details and email. They will receive a one-time link to choose their own username and password.</div></div>
+        <div class="alert alert-info"><i class="fas fa-info-circle"></i><div>Enter the employee's email and work details. Hire date is set to today automatically. The employee will receive a one-time link to complete their profile and set their login.</div></div>
         <div id="addEmpMsg" class="message" style="display:none;"></div>
         <form id="addEmployeeForm" onsubmit="submitAddEmployee(event)">
-            <div style="font-weight:700;font-size:0.9rem;color:var(--green-800);margin-bottom:1rem;border-bottom:2px solid var(--green-100);padding-bottom:0.5rem;">Employee Information</div>
-            <div class="form-row"><div class="form-col"><div class="form-group"><label>First Name</label><input type="text" class="form-control" name="firstName" autocomplete="given-name" required></div></div><div class="form-col"><div class="form-group"><label>Last Name</label><input type="text" class="form-control" name="lastName" autocomplete="family-name" required></div></div></div>
-            <div class="alert alert-info"><i class="fas fa-lock"></i><div>These details support leave eligibility checks. “Living with spouse” includes employees temporarily away because of work.</div></div>
+            <div class="form-group"><label>Employee Email</label><input type="email" class="form-control" name="email" maxlength="150" autocomplete="email" required></div>
             <div class="form-row">
-                <div class="form-col"><div class="form-group"><label>Gender</label><select class="form-control" name="gender" required><option value="">Select</option><option value="male">Male</option><option value="female">Female</option><option value="other">Other</option><option value="prefer_not_to_say">Prefer not to say</option></select></div></div>
-                <div class="form-col"><div class="form-group"><label>Marital Status</label><select class="form-control" name="maritalStatus" id="addEmpMarital" required><option value="">Select</option><option value="single">Single</option><option value="married">Married</option><option value="separated">Separated</option><option value="widowed">Widowed</option><option value="other">Other</option></select></div></div>
-                <div class="form-col" id="addEmpCohabitingWrap" style="display:none;"><div class="form-group"><label>Do you live together with your spouse?</label><select class="form-control" name="cohabitingWithSpouse" id="addEmpCohabiting"><option value="">Select</option><option value="1">Yes</option><option value="0">No</option></select><small>Temporary separation for work may still meet the legal cohabitation rule; verify eligibility before approval.</small></div></div>
+                <div class="form-col"><div class="form-group"><label>Department</label><select class="form-control" name="department" id="addEmpDept" required onchange="addEmpPopulatePositions()"><option value="">Select Department</option>${deptOptions}</select></div></div>
+                <div class="form-col"><div class="form-group"><label>Position</label><select class="form-control" name="position" id="addEmpPosition" required><option value="">Select a department first</option></select></div></div>
             </div>
             <div class="form-row">
-                <div class="form-col"><div class="form-group"><label>Department</label><select class="form-control" name="department" id="addEmpDept" autocomplete="off" required onchange="addEmpPopulatePositions()"><option value="">Select Department</option>${deptOptions}</select></div></div>
-                <div class="form-col"><div class="form-group"><label>Position</label><select class="form-control" name="position" id="addEmpPosition" autocomplete="off" required><option value="">Select a department first</option></select></div></div>
-            </div>
-            <div class="form-row"><div class="form-col"><div class="form-group"><label>Email</label><input type="email" class="form-control" name="email" autocomplete="email" required></div></div><div class="form-col"><div class="form-group"><label>Phone</label><input type="tel" class="form-control" name="phone" id="addEmpPhone" inputmode="numeric" maxlength="11" placeholder="09171234567" autocomplete="tel" oninput="this.value=this.value.replace(/\\D/g,'').slice(0,11)"></div></div></div>
-            <div class="form-group"><label>Address</label><input type="text" class="form-control" name="address" autocomplete="street-address" placeholder="Complete address"></div>
-            <div class="form-row"><div class="form-col"><div class="form-group"><label>Emergency Contact Name</label><input type="text" class="form-control" name="emergencyContactName" autocomplete="off"></div></div><div class="form-col"><div class="form-group"><label>Emergency Contact Phone</label><input type="tel" class="form-control" name="emergencyContactPhone" maxlength="11" autocomplete="off" oninput="this.value=this.value.replace(/\\D/g,'').slice(0,11)"></div></div></div>
-            <div class="form-row">
-                <div class="form-col"><div class="form-group"><label>Employment Type</label><select class="form-control" name="employmentType" id="addEmpType" autocomplete="off" onchange="addEmpToggleRate()"><option>Full-time</option><option>Part-time</option></select></div></div>
+                <div class="form-col"><div class="form-group"><label>Employment Type</label><select class="form-control" name="employmentType" id="addEmpType" required onchange="addEmpToggleRate()"><option>Full-time</option><option>Part-time</option></select></div></div>
                 <div class="form-col">
-                    <div class="form-group" id="addEmpSalaryGroup"><label>Basic Salary (₱ / day)</label><input type="number" class="form-control" name="salary" id="addEmpSalaryInput" min="0" step="0.01" value="575" autocomplete="off"></div>
-                    <div class="form-group" id="addEmpHourlyGroup" style="display:none;"><label>Hourly Rate (₱ / hour)</label><input type="number" class="form-control" name="hourlyRate" id="addEmpHourlyInput" min="0" step="0.01" autocomplete="off" disabled></div>
+                    <div class="form-group" id="addEmpSalaryGroup"><label>Salary (&#8369; / day)</label><input type="number" class="form-control" name="salary" id="addEmpSalaryInput" min="0.01" step="0.01" value="575" required></div>
+                    <div class="form-group" id="addEmpHourlyGroup" style="display:none;"><label>Salary Rate (&#8369; / hour)</label><input type="number" class="form-control" name="hourlyRate" id="addEmpHourlyInput" min="0.01" step="0.01" disabled required></div>
                 </div>
             </div>
-            <div class="form-row"><div class="form-col"><div class="form-group"><label>Hire Date</label><input type="date" class="form-control" name="hireDate" value="${today}" autocomplete="off"></div></div></div>
-            <div style="font-weight:700;font-size:0.9rem;color:var(--green-800);margin-bottom:1rem;margin-top:1rem;border-bottom:2px solid var(--green-100);padding-bottom:0.5rem;">Government Contributions</div>
-            <div class="alert alert-info" style="margin-bottom:0.85rem;"><i class="fas fa-info-circle"></i><div>All three are enabled by default. Uncheck any the employee opts out of — in exchange, they won't receive that benefit and it won't be deducted from their pay.</div></div>
-            <div style="display:flex;gap:1.5rem;margin-bottom:1.25rem;">
-                <label style="display:flex;align-items:center;gap:0.4rem;font-weight:600;"><input type="checkbox" name="sssEnabled" id="addEmpSss" checked onchange="toggleGovIdField('addEmpSss','addEmpSssNum')"> SSS</label>
-                <label style="display:flex;align-items:center;gap:0.4rem;font-weight:600;"><input type="checkbox" name="philhealthEnabled" id="addEmpPhil" checked onchange="toggleGovIdField('addEmpPhil','addEmpPhilNum')"> PhilHealth</label>
-                <label style="display:flex;align-items:center;gap:0.4rem;font-weight:600;"><input type="checkbox" name="pagibigEnabled" id="addEmpPag" checked onchange="toggleGovIdField('addEmpPag','addEmpPagNum')"> Pag-IBIG</label>
-            </div>
-            <div class="form-row">
-                <div class="form-col"><div class="form-group"><label>SSS Number</label><input type="text" class="form-control" name="govSss" id="addEmpSssNum" inputmode="numeric" maxlength="10" placeholder="10 digits" autocomplete="off" oninput="this.value=this.value.replace(/\D/g,'').slice(0,10)"></div></div>
-                <div class="form-col"><div class="form-group"><label>PhilHealth ID Number</label><input type="text" class="form-control" name="govPhilhealth" id="addEmpPhilNum" inputmode="numeric" maxlength="12" placeholder="12 digits" autocomplete="off" oninput="this.value=this.value.replace(/\D/g,'').slice(0,12)"></div></div>
-                <div class="form-col"><div class="form-group"><label>Pag-IBIG MID Number</label><input type="text" class="form-control" name="govPagibig" id="addEmpPagNum" inputmode="numeric" maxlength="12" placeholder="12 digits" autocomplete="off" oninput="this.value=this.value.replace(/\D/g,'').slice(0,12)"></div></div>
-            </div>
-            <button type="submit" class="btn"><i class="fas fa-envelope"></i> Create Employee &amp; Send Invitation</button>
+            <div class="alert alert-info"><i class="fas fa-calendar-day"></i><div>Hire date: today (set automatically when the invitation is created).</div></div>
+            <button type="submit" class="btn"><i class="fas fa-envelope"></i> Send Setup Link</button>
         </form>
         </div></div>`;
-        ['addEmpSss','addEmpPhil','addEmpPag'].forEach(id => {
-        const pair = { addEmpSss: 'addEmpSssNum', addEmpPhil: 'addEmpPhilNum', addEmpPag: 'addEmpPagNum' };
-        toggleGovIdField(id, pair[id]);
-    });
-    const maritalSelect = document.getElementById('addEmpMarital');
-    maritalSelect?.addEventListener('change', () => {
-        const married = maritalSelect.value === 'married';
-        document.getElementById('addEmpCohabitingWrap').style.display = married ? 'block' : 'none';
-        document.getElementById('addEmpCohabiting').required = married;
-        if (!married) document.getElementById('addEmpCohabiting').value = '';
-    });
+    addEmpToggleRate();
 }
-
 async function submitAddEmployee(e) {
     e.preventDefault();
     const data = Object.fromEntries(new FormData(e.target));
-    data.sssEnabled       = document.getElementById('addEmpSss').checked ? 1 : 0;
-    data.philhealthEnabled = document.getElementById('addEmpPhil').checked ? 1 : 0;
-    data.pagibigEnabled   = document.getElementById('addEmpPag').checked ? 1 : 0;
     const btn = e.target.querySelector('button[type=submit]');
-    btn.disabled = true; btn.textContent = 'Creating and sending...';
+    btn.disabled = true; btn.textContent = 'Sending setup link...';
     const result = await apiCall(`${API.EMP}?action=create`, 'POST', data);
-    btn.disabled = false; btn.innerHTML = '<i class="fas fa-envelope"></i> Create Employee &amp; Send Invitation';
+    btn.disabled = false; btn.innerHTML = '<i class="fas fa-envelope"></i> Send Setup Link';
     if (result.success) {
         showMsg('addEmpMsg', `${result.message} Staff ID: ${result.staffId}`, result.invitationSent ? 'success' : 'error');
         e.target.reset();

@@ -46,10 +46,10 @@ function setupEventListeners() {
     document.getElementById('loginForm').addEventListener('submit', handleLogin);
     document.getElementById('forgotPassword').addEventListener('click', e => { e.preventDefault(); document.getElementById('forgotPasswordModal').style.display = 'flex'; });
     document.querySelectorAll('.close-modal').forEach(btn => btn.addEventListener('click', function () { this.closest('.modal').style.display = 'none'; }));
-    document.querySelectorAll('.modal').forEach(m => m.addEventListener('click', function (e) { if (e.target === this) this.style.display = 'none'; }));
     document.getElementById('forgotPasswordForm').addEventListener('submit', handleForgotPassword);
     document.getElementById('resetPasswordForm')?.addEventListener('submit', handleResetPassword);
     document.getElementById('registrationForm')?.addEventListener('submit', handleCompleteRegistration);
+      document.getElementById('registrationMarital')?.addEventListener('change', updateRegistrationMaritalFields);
     document.getElementById('newPassword').addEventListener('input', checkNewPasswordStrength);
     document.getElementById('psCalcNDCheck')?.addEventListener('change', function () { document.getElementById('psCalcNDSub')?.classList.toggle('visible', this.checked); });
     document.getElementById('psCalcOTCheck')?.addEventListener('change', function () { document.getElementById('psCalcOTSub')?.classList.toggle('visible', this.checked); });
@@ -132,10 +132,21 @@ async function openRegistrationLinkIfPresent() {
     document.getElementById('registrationModal').style.display = 'flex';
     const result = await apiCall(`${API.AUTH}?action=registration-info`, 'POST', { token });
     if (result.success) {
-        document.getElementById('registrationAccount').textContent = `Set up the account for ${result.account.full_name} (${result.account.email}).`;
+        document.getElementById('registrationAccount').textContent = `Complete your employee profile for ${result.account.email}. Staff ID: ${result.account.staff_id}.`;
     } else {
         showMsg('registrationMsg', result.message || 'This registration link is invalid or expired.', 'error');
         document.getElementById('registrationForm').style.display = 'none';
+    }
+}
+
+function updateRegistrationMaritalFields() {
+    const married = document.getElementById('registrationMarital')?.value === 'married';
+    const wrap = document.getElementById('registrationCohabitingWrap');
+    const input = document.getElementById('registrationCohabiting');
+    if (wrap) wrap.style.display = married ? '' : 'none';
+    if (input) {
+        input.required = married;
+        if (!married) input.value = '';
     }
 }
 
@@ -149,7 +160,22 @@ async function handleCompleteRegistration(e) {
     if (password !== confirm) { showMsg('registrationMsg', 'Passwords do not match.', 'error'); return; }
     const button = e.target.querySelector('button[type="submit"]');
     button.disabled = true;
-    const result = await apiCall(`${API.AUTH}?action=complete-registration`, 'POST', { token: activeRegistrationToken, username, password });
+    const maritalStatus = document.getElementById('registrationMarital').value;
+    const result = await apiCall(`${API.AUTH}?action=complete-registration`, 'POST', {
+        token: activeRegistrationToken, username, password,
+        firstName: document.getElementById('registrationFirstName').value.trim(),
+        lastName: document.getElementById('registrationLastName').value.trim(),
+        gender: document.getElementById('registrationGender').value,
+        maritalStatus,
+        cohabitingWithSpouse: maritalStatus === 'married' ? document.getElementById('registrationCohabiting').value : null,
+        phone: document.getElementById('registrationPhone').value.trim(),
+        address: document.getElementById('registrationAddress').value.trim(),
+        emergencyContactName: document.getElementById('registrationEmergencyName').value.trim(),
+        emergencyContactPhone: document.getElementById('registrationEmergencyPhone').value.trim(),
+        sss: document.getElementById('registrationSss').value.trim(),
+        pagibig: document.getElementById('registrationPagibig').value.trim(),
+        philhealth: document.getElementById('registrationPhilhealth').value.trim()
+    });
     button.disabled = false;
     if (result.success) {
         activeRegistrationToken = '';

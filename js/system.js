@@ -180,8 +180,32 @@ async function loadSystemSettings(c) {
             </div>
             <div class="tab-content" id="payroll-settings-tab"><form id="payrollSettingsForm" style="padding-top:1rem;">
                 <div class="alert alert-info"><i class="fas fa-calendar-days"></i><div><strong>Payroll schedule: Semi-monthly</strong><br>26th of the previous month through the 10th is paid on the 15th. The 11th through the 25th is paid on the 30th, or the last day in a shorter month.</div></div>
-                <div class="form-group"><label>Paid Work Hours/Day (8 for 8 AM–12 PM and 1 PM–5 PM; used to convert daily rate to hourly rate)</label><input type="number" class="form-control" name="work_hours_per_day" min="1" max="24" step="0.5"></div> 
-                <div class="form-group"><label>Overtime Rate Multiplier</label><input type="number" class="form-control" name="overtime_rate" value="1.25" step="0.01" min="1"></div>
+                <div class="form-group"><label>Paid Work Hours/Day (8 for 8 AM–12 PM and 1 PM–5 PM; used to convert daily rate to hourly rate)</label><input type="number" class="form-control" name="work_hours_per_day" min="1" max="24" step="0.5"></div>
+                <div class="alert alert-info"><i class="fas fa-circle-info"></i><div>Government contribution rates are maintained in the payroll calculation and are not editable here. Expand a section below to see the calculation basis and official schedule.</div></div>
+                <div style="display:grid;gap:.65rem;margin:1rem 0 1.25rem;">
+                    <details style="border:1px solid var(--border);border-radius:8px;padding:.8rem 1rem;">
+                        <summary style="cursor:pointer;font-weight:700;color:var(--green-800);">SSS - salary credit table</summary>
+                        <p style="margin:.7rem 0;">The employee share is looked up from the SSS Monthly Salary Credit (MSC) schedule. The current schedule is effective January 2025, with MSC from ₱5,000 to ₱35,000. The employee share includes the regular SSS portion and, where applicable, the Mandatory Provident Fund portion.</p>
+                        <a href="https://www.sss.gov.ph/wp-content/uploads/2024/12/2025-SSS-Contribution-Table-rev.pdf" target="_blank" rel="noopener noreferrer">Open official SSS contribution table (PDF)</a>
+                    </details>
+                    <details style="border:1px solid var(--border);border-radius:8px;padding:.8rem 1rem;">
+                        <summary style="cursor:pointer;font-weight:700;color:var(--green-800);">PhilHealth - percentage with floor and ceiling</summary>
+                        <p style="margin:.7rem 0;">The current published schedule uses 5% of monthly basic salary, with a ₱10,000 floor and ₱100,000 ceiling. The employee share is half of the premium (2.5%); the employer pays the other half. The application uses the employee share in the payslip.</p>
+                        <a href="https://www.philhealth.gov.ph/advisories/2025/PA2025-0002.pdf" target="_blank" rel="noopener noreferrer">Open official PhilHealth advisory (PDF)</a>
+                    </details>
+                    <details style="border:1px solid var(--border);border-radius:8px;padding:.8rem 1rem;">
+                        <summary style="cursor:pointer;font-weight:700;color:var(--green-800);">Pag-IBIG - compensation tiers with a cap</summary>
+                        <p style="margin:.7rem 0;">The employee rate is 1% for monthly compensation of ₱1,500 or less and 2% above ₱1,500. The calculation caps compensation at ₱10,000, so the maximum employee share is ₱200 per month. Employer share is separate and is not deducted from employee pay.</p>
+                        <div class="table-container" style="margin:.75rem 0;">
+                            <table><thead><tr><th>Monthly compensation</th><th>Employee share</th><th>Employer share</th><th>Total</th></tr></thead><tbody>
+                                <tr><td>&#8369;1,500 and below</td><td>1% of compensation</td><td>2% of compensation</td><td>3% total</td></tr>
+                                <tr><td>Over &#8369;1,500 to &#8369;10,000</td><td>2% of compensation</td><td>2% of compensation</td><td>4% total</td></tr>
+                                <tr><td>Above &#8369;10,000</td><td>&#8369;200 (capped)</td><td>&#8369;200 (capped)</td><td>&#8369;400 total</td></tr>
+                            </tbody></table>
+                        </div>
+                        <a href="https://www.pagibigfund.gov.ph/document/pdf/circulars/provident/Circular%20No.%20460%20-%20Guidelines%20on%20the%20Pag-IBIG%20Fund%27s%20Implementation%20of%20Increase%20in%20the%20MFS%20Effective%20February%202024.pdf" target="_blank" rel="noopener noreferrer">Open official Pag-IBIG Circular No. 460 (MFS increase effective February 2024)</a>
+                    </details>
+                </div>
                 <button type="submit" class="btn">Save Settings</button></form>
             </div>
             <div class="tab-content" id="data-archiving-tab">
@@ -208,7 +232,7 @@ async function loadSystemSettings(c) {
     const data = await apiCall(`${API.SYS}?action=settings`);
     if (data.success && data.settings) {
         const s = data.settings;
-        ['company_name','company_address','company_phone','company_email','work_hours_per_day','overtime_rate','archive_after_years'].forEach(k => {
+        ['company_name','company_address','company_phone','company_email','work_hours_per_day','archive_after_years'].forEach(k => {
             const el = c.querySelector(`[name="${k}"]`);
             if (el && s[k] !== undefined) el.value = s[k];
         });
