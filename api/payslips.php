@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/../config/helpers.php';
+require_once __DIR__ . '/../config/payroll_cutoff.php';
 
 commonHeaders();
 $action = $_GET['action'] ?? 'list';
@@ -213,30 +214,17 @@ function calculateSssEmployeeShare(float $monthlyCompensation): float {
     return round($msc * 0.05, 2);
 }
 
-function scheduledPayDateForCutoff(string $payPeriod, string $cutoffStart, string $cutoffEnd): ?string {
-    $monthStart = DateTime::createFromFormat('!Y-m-d', $payPeriod . '-01');
-    if (!$monthStart || $monthStart->format('Y-m') !== $payPeriod) return null;
-
-    $previousMonthStart = (clone $monthStart)->modify('-1 month');
-    $month = $monthStart->format('Y-m');
-    if ($cutoffStart === $previousMonthStart->format('Y-m') . '-26' && $cutoffEnd === $month . '-10') {
-        return $month . '-15';
+function findOverlappingPayrollBatch(PDO $db, string $cutoffStart, string $cutoffEnd, ?int $excludeId = null, bool $approvedOnly = false): ?array {
+    $statusFilter = $approvedOnly ? 'status="approved"' : 'status IN ("pending","approved")';
+    $sql = 'SELECT id, cutoff_start, cutoff_end, status FROM payroll_batches WHERE cutoff_start<=? AND cutoff_end>=? AND ' . $statusFilter;
+    $params = [$cutoffEnd, $cutoffStart];
+    if ($excludeId !== null) {
+        $sql .= ' AND id!=?';
+        $params[] = $excludeId;
     }
-
-    $lastDay = (int)$monthStart->format('t');
-    if ($cutoffStart === $month . '-11' && $cutoffEnd === $month . '-25') {
-        return $month . '-' . str_pad((string)min(30, $lastDay), 2, '0', STR_PAD_LEFT);
-    }
-    return null;
-}
-
-function isLegacyPayrollCutoff(string $payPeriod, string $cutoffStart, string $cutoffEnd): bool {
-    $monthStart = DateTime::createFromFormat('!Y-m-d', $payPeriod . '-01');
-    if (!$monthStart || $monthStart->format('Y-m') !== $payPeriod) return false;
-    $lastDay = (int)$monthStart->format('t');
-    $month = $monthStart->format('Y-m');
-    return ($cutoffStart === $month . '-01' && $cutoffEnd === $month . '-15')
-        || ($cutoffStart === $month . '-16' && $cutoffEnd === $month . '-' . str_pad((string)$lastDay, 2, '0', STR_PAD_LEFT));
+    $st = $db->prepare($sql . ' ORDER BY cutoff_start DESC LIMIT 1');
+    $st->execute($params);
+    return $st->fetch() ?: null;
 }
 
 function computeProgressiveTax(float $income, array $brackets): float {
@@ -413,7 +401,7 @@ switch ($action) {
             jsonError('Enter a valid pay period.');
         }
         $payDate = scheduledPayDateForCutoff($payPeriod, $cutoffStart, $cutoffEnd);
-        if ($payDate === null) jsonError('Use the 26th–10th cutoff for payday on the 15th, or the 11th–25th cutoff for payday on the 30th.');
+        if ($payDate === null) jsonError('Use the 26th–10th cutoff for payday on the 15th, or the 11th–25th cutoff for payday on the 30th (month-end in shorter months).');
         foreach (['taxAllow' => $taxAllow, 'nonTaxAllow' => $nonTaxAllow] as $field => $amount) {
             if (!is_numeric($body[$field] ?? null) || !is_finite($amount) || $amount < 0 || $amount > 1000000) {
                 jsonError('Allowances must be valid non-negative amounts.');
@@ -446,10 +434,10 @@ switch ($action) {
         $netPay = round(max(0, $grossPay - $totalDed), 2);
         $empType = $computedDtr['employee']['employmentType'];
 
-        // Block generating two payslips for the same employee + same cutoff
-        $dupChk = $db->prepare('SELECT id FROM payslips WHERE employee_user_id=? AND cutoff_start=? AND cutoff_end=? AND status != "declined" LIMIT 1');
-        $dupChk->execute([$empUserId, $cutoffStart, $cutoffEnd]);
-        if ($dupChk->fetch()) jsonError('A payslip for this employee and cutoff already exists.');
+        // Block paying any of this employee's attendance dates twice.
+        $dupChk = $db->prepare('SELECT cutoff_start,cutoff_end FROM payslips WHERE employee_user_id=? AND payslip_type="regular" AND cutoff_start<=? AND cutoff_end>=? AND status!="declined" LIMIT 1');
+        $dupChk->execute([$empUserId, $cutoffEnd, $cutoffStart]);
+        if ($overlap = $dupChk->fetch()) jsonError("This employee already has a payslip covering {$overlap['cutoff_start']} to {$overlap['cutoff_end']}.", 409);
 
         $db->prepare('
             INSERT INTO payslips
@@ -485,11 +473,24 @@ switch ($action) {
         if (!$id) jsonError('Payslip ID required.');
 
         $db = getDB();
-        $st = $db->prepare('SELECT id, status, employee_user_id, pay_period FROM payslips WHERE id = ? LIMIT 1');
+        $st = $db->prepare('SELECT id, status, employee_user_id, pay_period, payslip_type, cutoff_start, cutoff_end, pay_date FROM payslips WHERE id = ? LIMIT 1');
         $st->execute([$id]);
         $slip = $st->fetch();
         if (!$slip) jsonError('Payslip not found.', 404);
         if ($slip['status'] !== 'pending') jsonError('Only pending payslips can be approved.');
+
+        if ($slip['payslip_type'] === 'regular') {
+            $expectedPayDate = $slip['cutoff_start'] !== null && $slip['cutoff_end'] !== null
+                ? scheduledPayDateForCutoff($slip['pay_period'], $slip['cutoff_start'], $slip['cutoff_end']) : null;
+            if ($expectedPayDate === null || $slip['pay_date'] !== $expectedPayDate) {
+                jsonError('This payslip does not follow the current cutoff and payday schedule. Decline it and generate a new payslip.', 409);
+            }
+            $overlapSt = $db->prepare('SELECT id,cutoff_start,cutoff_end FROM payslips WHERE employee_user_id=? AND payslip_type="regular" AND status="approved" AND cutoff_start<=? AND cutoff_end>=? AND id!=? LIMIT 1');
+            $overlapSt->execute([$slip['employee_user_id'], $slip['cutoff_end'], $slip['cutoff_start'], $id]);
+            if ($overlap = $overlapSt->fetch()) {
+                jsonError("This employee already has an approved payslip covering {$overlap['cutoff_start']} to {$overlap['cutoff_end']}.", 409);
+            }
+        }
 
         $db->prepare('UPDATE payslips SET status="approved", approved_by=?, approved_at=NOW(), remarks=? WHERE id=?')
            ->execute([$user['id'], $body['remarks'] ?? null, $id]);
@@ -680,11 +681,10 @@ switch ($action) {
         $existingBatch = $existingSt->fetch();
 
         $scheduledPayDate = scheduledPayDateForCutoff($payPeriod, $cutoffStart, $cutoffEnd);
-        if ($scheduledPayDate !== null) {
-            $payDate = $scheduledPayDate;
-        } elseif (!$existingBatch || $existingBatch['status'] !== 'declined' || !isLegacyPayrollCutoff($payPeriod, $cutoffStart, $cutoffEnd)) {
-            jsonError('Use the 26th–10th cutoff for payday on the 15th, or the 11th–25th cutoff for payday on the 30th.');
+        if ($scheduledPayDate === null) {
+            jsonError('Use the 26th–10th cutoff for payday on the 15th, or the 11th–25th cutoff for payday on the 30th (month-end in shorter months).');
         }
+        $payDate = $scheduledPayDate;
 
         if ($existingBatch) {
             if ($existingBatch['status'] === 'pending') {
@@ -694,6 +694,11 @@ switch ($action) {
                 jsonError('This cutoff has already been approved. It cannot be regenerated.');
             }
             // status === 'declined' -> falls through, we regenerate this same entity
+        }
+
+        $overlap = findOverlappingPayrollBatch($db, $cutoffStart, $cutoffEnd, $existingBatch ? (int)$existingBatch['id'] : null);
+        if ($overlap) {
+            jsonError("This cutoff overlaps payroll batch #{$overlap['id']} ({$overlap['cutoff_start']} to {$overlap['cutoff_end']}, {$overlap['status']}). Review that batch before generating another payroll.", 409);
         }
 
         $employees = $db->query('
@@ -728,10 +733,10 @@ switch ($action) {
             foreach ($employees as $row) {
                 $empUserId = (int)$row['user_id'];
 
-                // Only skip if this employee has a DIFFERENT non-declined payslip for this
-                // cutoff (e.g. one generated individually, outside this batch entity).
-                $dupChk = $db->prepare('SELECT id FROM payslips WHERE employee_user_id=? AND cutoff_start=? AND cutoff_end=? AND status != "declined" AND (payroll_batch_id IS NULL OR payroll_batch_id != ?) LIMIT 1');
-                $dupChk->execute([$empUserId, $cutoffStart, $cutoffEnd, $batchId]);
+                // Keep an employee's attendance days from being paid again by
+                // a separate regular payslip or batch with overlapping dates.
+                $dupChk = $db->prepare('SELECT id FROM payslips WHERE employee_user_id=? AND payslip_type="regular" AND cutoff_start<=? AND cutoff_end>=? AND status!="declined" AND (payroll_batch_id IS NULL OR payroll_batch_id!=?) LIMIT 1');
+                $dupChk->execute([$empUserId, $cutoffEnd, $cutoffStart, $batchId]);
                 if ($dupChk->fetch()) { $skipped++; continue; }
 
                 $dtr = computeDtrForEmployee($db, $empUserId, $cutoffStart, $cutoffEnd, $settings);
@@ -783,7 +788,7 @@ switch ($action) {
 
             if (!$created) {
                 $db->rollBack();
-                jsonError('Every active employee already has a payslip for this cutoff. Nothing to generate.');
+                jsonError('Every active employee already has a payslip covering some or all of this cutoff. Nothing to generate.');
             }
 
             $db->prepare('UPDATE payroll_batches SET employee_count=?, total_gross=?, total_deductions=?, total_net=? WHERE id=?')
@@ -799,7 +804,7 @@ switch ($action) {
         $verb = $isRegeneration ? 'regenerated' : 'generated';
         auditLog($user['id'], $isRegeneration ? 'regenerate_payroll' : 'generate_payroll', 'payslips', ucfirst($verb)." payroll batch id=$batchId, ".count($created)." payslip(s), cutoff $cutoffStart to $cutoffEnd");
         jsonOk(['batchId' => $batchId, 'created' => $created, 'skippedCount' => $skipped, 'regenerated' => $isRegeneration],
-            'Payroll ' . $verb . ' for ' . count($created) . ' employee(s)' . ($skipped ? " ($skipped already had a payslip for this cutoff)" : ''));
+            'Payroll ' . $verb . ' for ' . count($created) . ' employee(s)' . ($skipped ? " ($skipped had an overlapping payslip or missing payroll details)" : ''));
         break;
     }
 
@@ -897,11 +902,27 @@ switch ($action) {
         if (!$id) jsonError('Batch ID required.');
         $db = getDB();
 
-        $st = $db->prepare('SELECT id,status,generated_by,pay_period FROM payroll_batches WHERE id=? LIMIT 1');
+        $st = $db->prepare('SELECT id,status,generated_by,pay_period,cutoff_start,cutoff_end,pay_date FROM payroll_batches WHERE id=? LIMIT 1');
         $st->execute([$id]);
         $batch = $st->fetch();
         if (!$batch) jsonError('Payroll batch not found.', 404);
         if ($batch['status'] !== 'pending') jsonError('This payroll batch is already ' . $batch['status'] . '.');
+
+        $expectedPayDate = scheduledPayDateForCutoff($batch['pay_period'], $batch['cutoff_start'], $batch['cutoff_end']);
+        if ($expectedPayDate === null || $batch['pay_date'] !== $expectedPayDate) {
+            jsonError('This batch does not follow the current cutoff and payday schedule. Decline it and generate a new batch.', 409);
+        }
+
+        $overlap = findOverlappingPayrollBatch($db, $batch['cutoff_start'], $batch['cutoff_end'], $id, true);
+        if ($overlap) {
+            jsonError("Cannot approve this batch: payroll batch #{$overlap['id']} already covers {$overlap['cutoff_start']} to {$overlap['cutoff_end']}.", 409);
+        }
+
+        $overlapSt = $db->prepare('SELECT p.id,p.cutoff_start,p.cutoff_end FROM payslips p JOIN payslips current_slip ON current_slip.employee_user_id=p.employee_user_id AND current_slip.payroll_batch_id=? WHERE p.payslip_type="regular" AND p.status="approved" AND p.cutoff_start<=current_slip.cutoff_end AND p.cutoff_end>=current_slip.cutoff_start AND (p.payroll_batch_id IS NULL OR p.payroll_batch_id!=?) LIMIT 1');
+        $overlapSt->execute([$id, $id]);
+        if ($overlap = $overlapSt->fetch()) {
+            jsonError("Cannot approve this batch: approved payslip #{$overlap['id']} already covers {$overlap['cutoff_start']} to {$overlap['cutoff_end']}.", 409);
+        }
 
         $empSt = $db->prepare('SELECT employee_user_id FROM payslips WHERE payroll_batch_id=? AND status="pending"');
         $empSt->execute([$id]);

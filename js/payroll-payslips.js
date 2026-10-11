@@ -39,19 +39,29 @@ function loadGeneratePayroll(c) {
         <div class="form-row" style="margin-bottom:1rem;">
             <div class="form-col"><div class="form-group"><label>Pay Month</label><select id="prMonth" class="form-control" onchange="prToggleCutoff()">${monthOptions}</select></div></div>
             <div class="form-col"><div class="form-group"><label>Cutoff</label><select id="prCutoff" class="form-control" disabled>
-                <option value="1-15">Pay 15th: 26th previous month to 10th</option>
-                <option value="16-30">Pay 30th: 11th to 25th</option>
+                <option value="first">Pay 15th: 26th previous month to 10th</option>
+                <option value="second">Pay 30th / month-end: 11th to 25th</option>
             </select></div></div>
             <div class="form-col" style="display:flex;align-items:flex-end;"><button class="btn" style="width:100%;" onclick="prGenerate()"><i class="fas fa-play"></i> Generate Payroll</button></div>
         </div>
+        <div id="prCutoffPreview" class="alert alert-info" style="display:none;"></div>
         <div id="prResult"></div>
         <div id="prNeedsRevision" style="margin-top:2rem;"></div>
         </div></div>`;
+    document.getElementById('prCutoff').addEventListener('change', prToggleCutoff);
+    prToggleCutoff();
     prLoadNeedsRevision();
 }
 
 function prToggleCutoff() {
-    document.getElementById('prCutoff').disabled = !document.getElementById('prMonth').value;
+    const period = document.getElementById('prMonth').value;
+    const cutoff = document.getElementById('prCutoff');
+    const preview = document.getElementById('prCutoffPreview');
+    cutoff.disabled = !period;
+    if (!period) { preview.style.display = 'none'; return; }
+    const dates = prComputeCutoff(period, cutoff.value);
+    preview.textContent = `Cutoff: ${dates.cutoffStart} to ${dates.cutoffEnd}. Scheduled pay date: ${dates.payDate}. This preview does not generate payroll.`;
+    preview.style.display = 'block';
 }
 
 async function prLoadNeedsRevision() {
@@ -62,13 +72,19 @@ async function prLoadNeedsRevision() {
     el.innerHTML = `
         <div style="font-weight:700;font-size:0.95rem;color:var(--danger);margin-bottom:0.75rem;border-bottom:2px solid #fde2e2;padding-bottom:0.5rem;"><i class="fas fa-rotate-left"></i> Needs Revision</div>
         <div class="table-container"><table><thead><tr><th>Cutoff</th><th>Reason</th><th>Sent Back By</th><th>Date</th><th>Actions</th></tr></thead>
-        <tbody>${data.batches.map(b => `<tr>
+        <tbody>${data.batches.map(b => {
+            const currentSchedule = ['first', 'second'].some(half => {
+                const dates = prComputeCutoff(b.pay_period, half);
+                return dates.cutoffStart === b.cutoff_start && dates.cutoffEnd === b.cutoff_end;
+            });
+            return `<tr>
             <td>${escapeHtml(b.cutoff_start)} to ${escapeHtml(b.cutoff_end)}</td>
             <td style="max-width:260px;font-size:0.85rem;">${escapeHtml(b.remarks || '—')}</td>
             <td>${escapeHtml(b.approved_by_name || '—')}</td>
             <td>${new Date(b.approved_at || b.created_at).toLocaleDateString('en-PH')}</td>
-            <td><button class="action-btn btn-sm" data-cutoff-start="${escapeHtml(b.cutoff_start)}" data-cutoff-end="${escapeHtml(b.cutoff_end)}" data-pay-period="${escapeHtml(b.pay_period)}" data-pay-date="${escapeHtml(b.pay_date || '')}" onclick="prRegenerateBatchFromButton(this)"><i class="fas fa-rotate"></i> Regenerate</button></td>
-        </tr>`).join('')}</tbody></table></div>
+            <td>${currentSchedule ? `<button class="action-btn btn-sm" data-cutoff-start="${escapeHtml(b.cutoff_start)}" data-cutoff-end="${escapeHtml(b.cutoff_end)}" data-pay-period="${escapeHtml(b.pay_period)}" data-pay-date="${escapeHtml(b.pay_date || '')}" onclick="prRegenerateBatchFromButton(this)"><i class="fas fa-rotate"></i> Regenerate</button>` : 'Previous cutoff; create a new payroll using the current schedule.'}</td>
+        </tr>`;
+        }).join('')}</tbody></table></div>
     `;
 }
 
@@ -98,7 +114,7 @@ function prComputeCutoff(period, half) {
     const [y, m] = period.split('-').map(Number);
     const lastDay = new Date(y, m, 0).getDate();
     const formatDate = date => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-    if (half === '1-15') {
+    if (half === 'first') {
         const previousMonth26 = new Date(y, m - 2, 26);
         return { cutoffStart: formatDate(previousMonth26), cutoffEnd: `${period}-10`, payDate: `${period}-15` };
     }
@@ -112,14 +128,15 @@ async function prGenerate() {
     const resultEl = document.getElementById('prResult');
     if (!period) { showToast('Please select a month.', 'error'); return; }
 
+    const { cutoffStart, cutoffEnd, payDate } = prComputeCutoff(period, half);
+
     const confirmResult = await showAppConfirm({
         title: 'Generate Payroll',
-        message: 'Generate payroll for ALL active employees for this cutoff? This cannot be undone.',
+        message: `Generate payroll for all active employees from ${cutoffStart} to ${cutoffEnd}, scheduled for payment on ${payDate}?`,
         confirmLabel: 'Generate Payroll',
     });
     if (!confirmResult.confirmed) return;
 
-    const { cutoffStart, cutoffEnd, payDate } = prComputeCutoff(period, half);
     resultEl.innerHTML = '<div style="text-align:center;padding:2rem;color:var(--text-light);">Computing payroll for all employees...</div>';
 
     const data = await apiCall(`${API.PAYSLIPS}?action=generate-payroll`, 'POST', { payPeriod: period, cutoffStart, cutoffEnd, payDate });
@@ -456,7 +473,7 @@ function closePayslipModal() { document.getElementById('generatePayslipModal').s
 
 function psUpdateCutoff() {
     const period = document.getElementById('psPayPeriod').value; // YYYY-MM
-    const half   = document.getElementById('psCutoffHalf').value; // "1-15" or "16-30"
+    const half   = document.getElementById('psCutoffHalf').value; // first or second payday
     document.getElementById('psCutoffHalf').disabled = !period;
     if (!period) return;
     const schedule = prComputeCutoff(period, half);

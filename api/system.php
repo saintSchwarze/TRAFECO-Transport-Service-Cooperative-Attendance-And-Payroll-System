@@ -160,7 +160,7 @@ switch ($action) {
         foreach ($rows as $r) $settings[$r['setting_key']] = $r['setting_value'];
         // Legacy values remain in the database for old backups, but statutory
         // schedules are fixed in payroll code and are not exposed as settings.
-        foreach (['sss_rate', 'philhealth_rate', 'pagibig_rate', 'pagibig_cap', 'tax_brackets'] as $key) {
+        foreach (['sss_rate', 'philhealth_rate', 'pagibig_rate', 'pagibig_cap', 'tax_brackets', 'pay_frequency'] as $key) {
             unset($settings[$key]);
         }
         jsonOk(['settings' => $settings]);
@@ -176,7 +176,7 @@ switch ($action) {
 
         $allowedSettings = [
             'company_name', 'company_address', 'company_phone', 'company_email',
-            'pay_frequency', 'work_hours_per_day', 'overtime_rate',
+            'work_hours_per_day', 'overtime_rate',
             'archive_after_years', 'auto_archive',
         ];
         foreach (array_keys($body) as $key) {

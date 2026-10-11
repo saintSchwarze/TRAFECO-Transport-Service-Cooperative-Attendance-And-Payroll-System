@@ -179,7 +179,7 @@ async function loadSystemSettings(c) {
                 <button type="submit" class="btn">Save Settings</button></form>
             </div>
             <div class="tab-content" id="payroll-settings-tab"><form id="payrollSettingsForm" style="padding-top:1rem;">
-                <div class="form-group"><label>Pay Frequency</label><select class="form-control" name="pay_frequency"><option value="Weekly">Weekly</option><option value="Semi-Monthly">Semi-Monthly</option><option value="Monthly">Monthly</option></select></div>
+                <div class="alert alert-info"><i class="fas fa-calendar-days"></i><div><strong>Payroll schedule: Semi-monthly</strong><br>26th of the previous month through the 10th is paid on the 15th. The 11th through the 25th is paid on the 30th, or the last day in a shorter month.</div></div>
                 <div class="form-group"><label>Paid Work Hours/Day (8 for 8 AM–12 PM and 1 PM–5 PM; used to convert daily rate to hourly rate)</label><input type="number" class="form-control" name="work_hours_per_day" min="1" max="24" step="0.5"></div> 
                 <div class="form-group"><label>Overtime Rate Multiplier</label><input type="number" class="form-control" name="overtime_rate" value="1.25" step="0.01" min="1"></div>
                 <button type="submit" class="btn">Save Settings</button></form>
@@ -208,7 +208,7 @@ async function loadSystemSettings(c) {
     const data = await apiCall(`${API.SYS}?action=settings`);
     if (data.success && data.settings) {
         const s = data.settings;
-        ['company_name','company_address','company_phone','company_email','pay_frequency','work_hours_per_day','overtime_rate','archive_after_years'].forEach(k => {
+        ['company_name','company_address','company_phone','company_email','work_hours_per_day','overtime_rate','archive_after_years'].forEach(k => {
             const el = c.querySelector(`[name="${k}"]`);
             if (el && s[k] !== undefined) el.value = s[k];
         });
