@@ -8,6 +8,19 @@ apiMutationGuard([
     'request' => 'POST', 'notify-pregnancy' => 'POST', 'approve' => 'PUT', 'decline' => 'PUT', 'clear-all' => 'DELETE',
 ]);
 
+function enforceLeaveReviewer(PDO $db, int $requesterId, array $reviewer): void {
+    if ($requesterId === (int)$reviewer['id']) jsonError('You cannot approve or decline your own leave request.', 403);
+    $st = $db->prepare('SELECT role FROM users WHERE id=? LIMIT 1');
+    $st->execute([$requesterId]);
+    $requesterRole = $st->fetchColumn();
+    if ($requesterRole === 'manager' && $reviewer['role'] !== 'chairman') {
+        jsonError('A manager’s leave request must be reviewed by the chairman.', 403);
+    }
+    if ($requesterRole === 'chairman' && $reviewer['role'] !== 'manager') {
+        jsonError('The chairman’s leave request must be reviewed by the manager.', 403);
+    }
+}
+
 switch ($action) {
 
     // --------------------------------------------------------
@@ -37,7 +50,7 @@ switch ($action) {
         $user = requirePermission('approveLeave');
         $db   = getDB();
         $st   = $db->prepare(<<<'SQL'
-            SELECT lr.*, u.full_name AS employee_name, u.staff_id, u.department,
+            SELECT lr.*, u.full_name AS employee_name, u.staff_id, u.department, u.role AS requester_role,
                    (SELECT MAX(n.created_at) FROM leave_notifications n WHERE n.user_id=lr.user_id AND n.expected_delivery_date=lr.expected_delivery_date AND n.notification_type=CASE WHEN lr.leave_type LIKE 'Maternity Leave%' THEN 'maternity' ELSE 'paternity' END) AS pregnancy_notice_recorded_at
             FROM leave_requests lr
             JOIN users u ON lr.user_id = u.id
@@ -45,11 +58,31 @@ switch ($action) {
             ORDER BY lr.created_at ASC
         SQL);
         $st->execute();
-        $requests = $st->fetchAll();
+        $requests = array_values(array_filter($st->fetchAll(), static function(array $request) use ($user): bool {
+            if ((int)$request['user_id'] === (int)$user['id']) return false;
+            if ($request['requester_role'] === 'manager') return $user['role'] === 'chairman';
+            if ($request['requester_role'] === 'chairman') return $user['role'] === 'manager';
+            return in_array($user['role'], ['manager', 'chairman'], true);
+        }));
         $docs = $db->prepare('SELECT id,document_type FROM leave_request_attachments WHERE leave_request_id=? ORDER BY id');
         foreach ($requests as &$request) { $docs->execute([$request['id']]); $request['documents'] = $docs->fetchAll(); }
         unset($request);
         jsonOk(['requests' => $requests]);
+        break;
+    }
+
+    case 'my-notifications': {
+        $user = requirePermission('requestLeave');
+        $st = getDB()->prepare('SELECT id,notification_type,expected_delivery_date,spouse_name,notification_text,created_at FROM leave_notifications WHERE user_id=? ORDER BY created_at DESC');
+        $st->execute([$user['id']]);
+        jsonOk(['notifications' => $st->fetchAll()]);
+        break;
+    }
+
+    case 'notifications': {
+        requirePermission('approveLeave');
+        $st = getDB()->query('SELECT n.id,n.notification_type,n.expected_delivery_date,n.spouse_name,n.notification_text,n.created_at,u.full_name AS employee_name,u.staff_id,u.department FROM leave_notifications n JOIN users u ON u.id=n.user_id ORDER BY n.created_at DESC');
+        jsonOk(['notifications' => $st->fetchAll()]);
         break;
     }
 
@@ -150,21 +183,33 @@ switch ($action) {
         $soloParent = !empty($body['soloParent']) && $isMaternity && $contingency === 'live_birth';
         $allocatedDays = (int)($body['allocatedLeaveDays'] ?? 0);
         if ($allocatedDays < 0 || $allocatedDays > 7) jsonError('Allocated leave days must be between 0 and 7.');
+        $unpaidExtension = !empty($body['unpaidExtension']) && $isMaternity;
         $maternityPaidDays = null;
         $sssRecordedMonths = null;
         if ($isMaternity) {
             $genderSt = getDB()->prepare('SELECT gender FROM employees WHERE user_id=? LIMIT 1'); $genderSt->execute([$user['id']]);
             if (strtolower((string)$genderSt->fetchColumn()) !== 'female') jsonError('Maternity leave is only available to female employees.');
             if (!in_array($contingency, ['live_birth', 'miscarriage_etp'], true)) jsonError('Select live birth or miscarriage/emergency termination.');
-            $edd = $body['expectedDeliveryDate'] ?? '';
-            $eddDate = DateTime::createFromFormat('!Y-m-d', $edd);
-            if (!$eddDate || $eddDate->format('Y-m-d') !== $edd) jsonError('Enter the expected delivery date.');
-            $expectedDeliveryDate = $edd;
-            if ($contingency === 'live_birth' && $from < (clone $eddDate)->modify('-45 days')) jsonError('Maternity leave can begin no earlier than 45 days before the expected delivery date.');
+            if (($leaveType === 'Maternity Leave - Childbirth' && $contingency !== 'live_birth') || ($leaveType === 'Maternity Leave - Miscarriage/ETP' && $contingency !== 'miscarriage_etp')) jsonError('The maternity leave type and contingency do not match.');
+            if ($contingency === 'miscarriage_etp' && ($allocatedDays > 0 || !empty($body['soloParent']) || !empty($body['unpaidExtension']))) {
+                jsonError('Solo-parent days, allocated leave credits, and the unpaid extension apply only to live childbirth.');
+            }
+            $edd = trim($body['expectedDeliveryDate'] ?? '');
+            $eddDate = $edd !== '' ? DateTime::createFromFormat('!Y-m-d', $edd) : false;
+            if ($contingency === 'live_birth') {
+                if (!$eddDate || $eddDate->format('Y-m-d') !== $edd) jsonError('Enter the expected delivery date.');
+                $expectedDeliveryDate = $edd;
+                if ($eddDate < $today && empty($body['maternityActualEventDate'])) {
+                    jsonError('If the expected delivery date has passed, enter the actual delivery date for review.');
+                }
+                if ($from < (clone $eddDate)->modify('-45 days')) jsonError('Maternity leave can begin no earlier than 45 days before the expected delivery date.');
+            } elseif ($edd !== '' && (!$eddDate || $eddDate->format('Y-m-d') !== $edd)) {
+                jsonError('Enter a valid expected delivery date.');
+            }
             if ($allocatedDays && (trim($body['allocationRecipientName'] ?? '') === '' || trim($body['allocationRelationship'] ?? '') === '' || trim($body['allocationEmployer'] ?? '') === '')) jsonError('Complete the recipient name, relationship, and employer for allocated leave.');
             $basePaidDays = $contingency === 'live_birth' ? 105 + ($soloParent ? 15 : 0) : 60;
             $maternityPaidDays = max(0, $basePaidDays - $allocatedDays);
-            $expectedDays = $maternityPaidDays + (!empty($body['unpaidExtension']) ? 30 : 0);
+            $expectedDays = $maternityPaidDays + ($unpaidExtension ? 30 : 0);
             if ($days !== $expectedDays) jsonError("For the selected maternity options, the requested date range must cover $expectedDays calendar days.");
             $sssSt = getDB()->prepare('SELECT gov_sss FROM employees WHERE user_id=? LIMIT 1'); $sssSt->execute([$user['id']]);
             $storedSss = (string)$sssSt->fetchColumn();
@@ -172,6 +217,20 @@ switch ($action) {
             $eventDate = trim($body['maternityActualEventDate'] ?? '') ?: $edd;
             $event = DateTime::createFromFormat('!Y-m-d', $eventDate);
             if (!$event || $event->format('Y-m-d') !== $eventDate) jsonError('Enter a valid actual event date, or leave it blank.');
+            if ($contingency === 'live_birth' && $from < $today && empty($body['maternityActualEventDate'])) {
+                jsonError('For a retroactive childbirth leave request, enter the actual delivery date.');
+            }
+            if ($contingency === 'miscarriage_etp') {
+                if (empty($body['maternityActualEventDate'])) jsonError('Enter the actual miscarriage or emergency termination date.');
+                if ($event > new DateTime('today', new DateTimeZone('Asia/Manila'))) jsonError('The actual pregnancy-loss date cannot be in the future.');
+                if ($dateFrom !== $eventDate) jsonError('For miscarriage or emergency termination, maternity leave must start on the actual event date.');
+            } elseif (!empty($body['maternityActualEventDate'])) {
+                if ($event > new DateTime('today', new DateTimeZone('Asia/Manila'))) jsonError('The actual delivery date cannot be in the future.');
+                $earliestStart = (clone $event)->modify('-45 days');
+                $minimumPostnatalEnd = (clone $event)->modify('+59 days');
+                if ($from < $earliestStart) jsonError('Maternity leave may begin no earlier than 45 days before the actual delivery date.');
+                if ($to < $minimumPostnatalEnd) jsonError('Maternity leave must include at least 60 days after delivery. Adjust the leave start date.');
+            }
             $semesterStart = new DateTime($event->format('Y') . ((int)$event->format('n') <= 6 ? '-01-01' : '-07-01'));
             $periodStart = (clone $semesterStart)->modify('-12 months');
             $monthSt = getDB()->prepare('SELECT COUNT(*) FROM payslips WHERE employee_user_id=? AND payslip_type="regular" AND status="approved" AND sss_gsis>0 AND cutoff_start<=? AND cutoff_end>=?');
@@ -192,22 +251,43 @@ switch ($action) {
             $paternityNumber = (int)($body['deliveryNumber'] ?? 0);
             if ($paternityNumber < 1 || $paternityNumber > 4) jsonError('Paternity leave is limited to the first four deliveries.');
             if (!in_array($contingency, ['live_birth', 'miscarriage_etp'], true)) jsonError('Select the paternity contingency.');
-            $edd = $body['expectedDeliveryDate'] ?? '';
-            $eddDate = DateTime::createFromFormat('!Y-m-d', $edd);
-            if (!$eddDate || $eddDate->format('Y-m-d') !== $edd) jsonError('Enter the expected delivery date.');
-            $expectedDeliveryDate = $edd;
+            $edd = trim($body['expectedDeliveryDate'] ?? '');
+            if ($contingency === 'live_birth') {
+                $eddDate = DateTime::createFromFormat('!Y-m-d', $edd);
+                if (!$eddDate || $eddDate->format('Y-m-d') !== $edd) jsonError('Enter the expected delivery date.');
+                $expectedDeliveryDate = $edd;
+            } elseif ($edd !== '') {
+                $eddDate = DateTime::createFromFormat('!Y-m-d', $edd);
+                if (!$eddDate || $eddDate->format('Y-m-d') !== $edd) jsonError('Enter a valid expected delivery date or leave it blank for miscarriage / pregnancy loss.');
+                $expectedDeliveryDate = $edd;
+            }
             $paternityActualDate = $body['actualEventDate'] ?? null;
-            if ($paternityActualDate !== null && $paternityActualDate !== '') {
-                $actual = DateTime::createFromFormat('!Y-m-d', $paternityActualDate);
-                if (!$actual || $actual->format('Y-m-d') !== $paternityActualDate) jsonError('Enter a valid actual event date.');
-            } else $paternityActualDate = null;
+            if ($paternityActualDate === null || $paternityActualDate === '') jsonError('Enter the actual childbirth or pregnancy-loss date shown by the supporting document.');
+            $actual = DateTime::createFromFormat('!Y-m-d', $paternityActualDate);
+            if (!$actual || $actual->format('Y-m-d') !== $paternityActualDate) jsonError('Enter a valid actual event date.');
+            if ($actual > new DateTime('today', new DateTimeZone('Asia/Manila'))) jsonError('The actual childbirth or pregnancy-loss date cannot be in the future.');
+            if ($contingency === 'live_birth') {
+                $noticeCheck = getDB()->prepare('SELECT id FROM leave_notifications WHERE user_id=? AND notification_type="paternity" AND expected_delivery_date=? LIMIT 1');
+                $noticeCheck->execute([$user['id'], $edd]);
+                if (!$noticeCheck->fetch()) jsonError('Record the pregnancy notification before submitting a paternity leave request for childbirth.');
+            }
             $paternitySchedule = $body['scheduleOption'] ?? '';
             if (!in_array($paternitySchedule, ['consecutive', 'intermittent'], true)) jsonError('Select consecutive or intermittent leave dates.');
             $paternityDates = array_values(array_unique(array_filter(array_map('trim', explode(',', $body['paternityDates'] ?? '')))));
             sort($paternityDates);
             if (count($paternityDates) !== 7 || $dateFrom !== $paternityDates[0] || $dateTo !== $paternityDates[6]) jsonError('Select exactly seven paternity dates and make From/To match the first and last selected dates.');
-            foreach ($paternityDates as $paternityDate) { $parsed=DateTime::createFromFormat('!Y-m-d',$paternityDate); if (!$parsed || $parsed->format('Y-m-d') !== $paternityDate) jsonError('One or more paternity dates are invalid.'); }
-            if ($paternitySchedule === 'consecutive') for ($i=1;$i<7;$i++) if ((new DateTime($paternityDates[$i-1]))->modify('+1 day')->format('Y-m-d') !== $paternityDates[$i]) jsonError('Consecutive paternity leave must use seven consecutive dates.');
+            foreach ($paternityDates as $paternityDate) {
+                $parsed = DateTime::createFromFormat('!Y-m-d', $paternityDate);
+                if (!$parsed || $parsed->format('Y-m-d') !== $paternityDate) jsonError('One or more paternity dates are invalid.');
+                if ((int)$parsed->format('N') > 5) jsonError('Paternity leave dates must be scheduled workdays (Monday to Friday).');
+            }
+            if ($paternitySchedule === 'consecutive') {
+                for ($i = 1; $i < 7; $i++) {
+                    $nextWorkday = new DateTime($paternityDates[$i - 1]);
+                    do { $nextWorkday->modify('+1 day'); } while ((int)$nextWorkday->format('N') > 5);
+                    if ($nextWorkday->format('Y-m-d') !== $paternityDates[$i]) jsonError('Consecutive paternity leave must use seven consecutive workdays.');
+                }
+            }
             $days = 7;
             $used = getDB()->prepare('SELECT id FROM leave_requests WHERE user_id=? AND leave_type="Paternity Leave" AND paternity_delivery_number=? AND status IN ("pending","approved") LIMIT 1');
             $used->execute([$user['id'], $paternityNumber]); if ($used->fetch()) jsonError('That delivery number already has a pending or approved paternity request.');
@@ -246,8 +326,9 @@ switch ($action) {
         // its content, and files are served only through the permission checked endpoint.
         $documents = [];
         if ($isMaternity) {
-            $documents = ['pregnancyProof'=>'pregnancy_proof', 'mat1'=>'mat1'];
-            if ($contingency === 'miscarriage_etp') $documents['maternityEventProof'] = 'contingency_proof';
+            $documents = $contingency === 'live_birth'
+                ? ['pregnancyProof'=>'pregnancy_proof', 'mat1'=>'mat1']
+                : ['maternityEventProof'=>'contingency_proof'];
             if ($soloParent) $documents['soloParentId'] = 'solo_parent_id';
             if ($allocatedDays > 0) $documents['allocationNotice'] = 'allocation_notice';
         } elseif ($isPaternity) {
@@ -281,7 +362,7 @@ switch ($action) {
         $db->beginTransaction();
         try {
             $db->prepare('INSERT INTO leave_requests (user_id,leave_type,date_from,date_to,days,reason,proof_path,expected_delivery_date,contingency_type,solo_parent,allocated_leave_days,allocation_recipient_name,allocation_relationship,allocation_employer,unpaid_extension,notification_date,sss_recorded_months,paternity_delivery_number,paternity_actual_date,paternity_schedule_option,paternity_dates_json,maternity_paid_days) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
-                ->execute([$user['id'],$leaveType,$dateFrom,$dateTo,$days,$reason,$proofPath,$expectedDeliveryDate,$isStatutoryLeave?$contingency:null,(int)$soloParent,$allocatedDays,$isMaternity?($body['allocationRecipientName']??null):null,$isMaternity?($body['allocationRelationship']??null):null,$isMaternity?($body['allocationEmployer']??null):null,$isMaternity?(int)!empty($body['unpaidExtension']):0,$noticeDate,$sssRecordedMonths,$paternityNumber,$paternityActualDate,$paternitySchedule,$paternityDatesJson,$maternityPaidDays]);
+                ->execute([$user['id'],$leaveType,$dateFrom,$dateTo,$days,$reason,$proofPath,$expectedDeliveryDate,$isStatutoryLeave?$contingency:null,(int)$soloParent,$allocatedDays,$isMaternity?($body['allocationRecipientName']??null):null,$isMaternity?($body['allocationRelationship']??null):null,$isMaternity?($body['allocationEmployer']??null):null,(int)$unpaidExtension,$noticeDate,$sssRecordedMonths,$paternityNumber,$paternityActualDate,$paternitySchedule,$paternityDatesJson,$maternityPaidDays]);
             $id = (int)$db->lastInsertId();
             foreach ($documentPaths as $documentType => $path) $db->prepare('INSERT INTO leave_request_attachments (leave_request_id,document_type,file_path) VALUES (?,?,?)')->execute([$id,$documentType,$path]);
             $db->commit();
@@ -300,11 +381,20 @@ switch ($action) {
         if (!$id) jsonError('Request ID required.');
 
         $db = getDB();
-        $st = $db->prepare('SELECT id,status,user_id,leave_type,date_from,date_to FROM leave_requests WHERE id=? LIMIT 1');
+        $st = $db->prepare('SELECT id,status,user_id,leave_type,date_from,date_to,contingency_type,paternity_actual_date,paternity_dates_json FROM leave_requests WHERE id=? LIMIT 1');
         $st->execute([$id]);
         $req = $st->fetch();
         if (!$req) jsonError('Leave request not found.', 404);
         if ($req['status'] !== 'pending') jsonError('Request is already ' . $req['status'] . '.');
+        enforceLeaveReviewer($db, (int)$req['user_id'], $user);
+
+        if ($req['leave_type'] === 'Paternity Leave') {
+            $dates = json_decode($req['paternity_dates_json'] ?: '[]', true) ?: [];
+            $hasPreEventDates = false;
+            foreach ($dates as $leaveDate) if ($req['paternity_actual_date'] && $leaveDate <= $req['paternity_actual_date']) $hasPreEventDates = true;
+            if ($hasPreEventDates && empty($body['allowBeforeEvent'])) jsonError('This request includes leave before or on the birth or miscarriage date. Confirm that the employer permits these dates before approving.');
+            if ($hasPreEventDates && trim($body['remarks'] ?? '') === '') jsonError('Add a brief approval note explaining the employer-approved dates before or on the event date.');
+        }
 
         $paidAmount = null;
         if (str_starts_with($req['leave_type'], 'Maternity Leave')) {
@@ -337,6 +427,7 @@ switch ($action) {
         $req = $st->fetch();
         if (!$req) jsonError('Leave request not found.', 404);
         if ($req['status'] !== 'pending') jsonError('Request is already ' . $req['status'] . '.');
+        enforceLeaveReviewer($db, (int)$req['user_id'], $user);
 
         $remarks = $body['remarks'] ?? 'Declined';
         $db->prepare('UPDATE leave_requests SET status="declined", reviewed_by=?, reviewed_at=NOW(), remarks=? WHERE id=?')

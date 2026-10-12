@@ -219,7 +219,6 @@ async function openPayrollBatchDetail(id, showActions) {
     payrollBatchMeta = { id, canViewPayslips, isAnnual };
     const totalGross = data.payslips.reduce((s,p)=>s+parseFloat(p.gross_pay),0);
     const totalNet    = data.payslips.reduce((s,p)=>s+parseFloat(p.net_pay),0);
-    const totalUnpaidDeductions = data.payslips.reduce((s,p)=>s+parseFloat(p.unpaid_deduction_amount || 0),0);
 
     document.getElementById('payrollBatchDetail').innerHTML = `
         <div class="payslip-doc-grid" style="margin-bottom:1rem;">
@@ -227,7 +226,6 @@ async function openPayrollBatchDetail(id, showActions) {
             <div><span>Pay Date: </span><strong>${escapeHtml(b.pay_date || '—')}</strong></div>
             <div><span>Submitted By: </span><strong>${escapeHtml(b.generated_by_name)}</strong></div>
             <div><span>Total Net: </span><strong>${peso(b.total_net)}</strong></div>
-            ${isAnnual ? '' : `<div><span>Uncollected deductions (not carried forward): </span><strong>${peso(totalUnpaidDeductions)}</strong></div>`}
             <div><span>Status: </span><strong><span class="status ${sc}">${b.status.charAt(0).toUpperCase()+b.status.slice(1)}</span></strong></div>
             <div><span>Decided By: </span><strong>${escapeHtml(b.approved_by_name || '—')}</strong></div>
         </div>
@@ -239,12 +237,12 @@ async function openPayrollBatchDetail(id, showActions) {
         <div class="table-container"><table><thead>
             ${isAnnual
                 ? `<tr><th>Staff ID</th><th>Employee</th><th>Department</th><th>Approved basic pay</th><th>13th-month pay</th>${canViewPayslips ? '<th>Actions</th>' : ''}</tr>`
-                : `<tr><th rowspan="2">ID</th><th rowspan="2">Name</th><th rowspan="2">Department</th><th rowspan="2">Type</th><th rowspan="2">Rate/hr</th><th rowspan="2">Hours Rendered</th><th rowspan="2">Gross</th><th colspan="3">Calculated deductions</th><th rowspan="2">Uncollected</th><th rowspan="2">Net Pay</th>${canViewPayslips ? '<th rowspan="2">Actions</th>' : ''}</tr><tr><th>SSS</th><th>Pag-IBIG</th><th>PhilHealth</th></tr>`}
+                : `<tr><th rowspan="2">ID</th><th rowspan="2">Name</th><th rowspan="2">Department</th><th rowspan="2">Type</th><th rowspan="2">Rate/hr</th><th rowspan="2">Hours Rendered</th><th rowspan="2">Gross</th><th colspan="3">Calculated deductions</th><th rowspan="2">Net Pay</th>${canViewPayslips ? '<th rowspan="2">Actions</th>' : ''}</tr><tr><th>SSS</th><th>Pag-IBIG</th><th>PhilHealth</th></tr>`}
         </thead>
         <tbody id="pbdBody"></tbody>
         <tfoot><tr class="total-row">${isAnnual
             ? `<td colspan="3"><strong>Total (${data.payslips.length} employees)</strong></td><td><strong>${peso(data.payslips.reduce((s,p)=>s+parseFloat(p.thirteenth_month_basis || 0),0))}</strong></td><td><strong>${peso(totalNet)}</strong></td>${canViewPayslips ? '<td></td>' : ''}`
-            : `<td colspan="6"><strong>Total (all ${data.payslips.length})</strong></td><td><strong>${peso(totalGross)}</strong></td><td colspan="3"></td><td><strong>${peso(totalUnpaidDeductions)}</strong></td><td><strong>${peso(totalNet)}</strong></td>${canViewPayslips ? '<td></td>' : ''}`}</tr></tfoot>
+            : `<td colspan="6"><strong>Total (all ${data.payslips.length})</strong></td><td><strong>${peso(totalGross)}</strong></td><td colspan="3"></td><td><strong>${peso(totalNet)}</strong></td>${canViewPayslips ? '<td></td>' : ''}`}</tr></tfoot>
         </table></div>
         <div class="pager" id="pbdPager"></div>
         ${showActions ? `
@@ -286,7 +284,7 @@ function renderPayrollBatchTable() {
     });
 
     if (!filtered.length) {
-        tbody.innerHTML = `<tr><td colspan="${isAnnual ? (canViewPayslips ? 6 : 5) : (canViewPayslips?13:12)}" style="text-align:center;padding:2rem;color:var(--text-light);">No employees match your filters.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="${isAnnual ? (canViewPayslips ? 6 : 5) : (canViewPayslips?12:11)}" style="text-align:center;padding:2rem;color:var(--text-light);">No employees match your filters.</td></tr>`;
         document.getElementById('pbdPager').innerHTML = '';
         return;
     }
@@ -306,7 +304,6 @@ function renderPayrollBatchTable() {
         <td>${peso(p.sss_gsis)}</td>
         <td>${peso(p.pagibig)}</td>
         <td>${peso(p.philhealth)}</td>
-        <td>${peso(p.unpaid_deduction_amount || 0)}</td>
         <td><strong>${peso(p.net_pay)}</strong></td>
         ${canViewPayslips ? `<td><button class="action-btn btn-sm" onclick="viewPayslipDoc(${p.id})"><i class="fas fa-eye"></i> View Payslip</button></td>` : ''}
     </tr>`);
@@ -700,7 +697,7 @@ async function loadPayrollHistory(c) {
             <div class="form-col"><div class="form-group"><label>Month</label><select id="phMonthFilter" class="form-control" onchange="fetchPayrollHistory()">${monthOpts}</select></div></div>
             <div class="form-col"><div class="form-group"><label>Year</label><select id="phYearFilter" class="form-control" onchange="fetchPayrollHistory()">${yearOpts}</select></div></div>
         </div>
-        <div class="table-container"><table><thead><tr><th>Cutoff / Annual Period</th><th>Employees</th><th>Total Gross</th><th>Calculated Deductions</th><th>Uncollected</th><th>Total Net</th><th>Status</th><th>Decided By</th><th>Actions</th></tr></thead><tbody id="payrollHistBody"><tr><td colspan="9" style="text-align:center;padding:2rem;color:var(--text-light);">Loading...</td></tr></table></div>
+        <div class="table-container"><table><thead><tr><th>Cutoff / Annual Period</th><th>Employees</th><th>Total Gross</th><th>Calculated Deductions</th><th>Total Net</th><th>Status</th><th>Decided By</th><th>Actions</th></tr></thead><tbody id="payrollHistBody"><tr><td colspan="8" style="text-align:center;padding:2rem;color:var(--text-light);">Loading...</td></tr></table></div>
         <div class="pager" id="payrollHistPager"></div>
         </div></div>`;
     await fetchPayrollHistory();
@@ -715,7 +712,7 @@ async function fetchPayrollHistory() {
     const data = await apiCall(url);
     const tbody = document.getElementById('payrollHistBody');
     if (!data.success || !data.batches.length) {
-        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:2rem;color:var(--text-light);">No payroll history yet.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:2rem;color:var(--text-light);">No payroll history yet.</td></tr>';
         document.getElementById('payrollHistPager').innerHTML = '';
         return;
     }
@@ -726,7 +723,6 @@ async function fetchPayrollHistory() {
             <td>${b.employee_count}</td>
             <td>${peso(b.total_gross)}</td>
             <td>${peso(b.total_deductions)}</td>
-            <td>${peso(b.unpaid_deduction_total || 0)}</td>
             <td><strong>${peso(b.total_net)}</strong></td>
             <td><span class="status ${sc}">${escapeHtml(b.status.charAt(0).toUpperCase()+b.status.slice(1))}</span></td>
             <td>${escapeHtml(b.approved_by_name || '—')}</td>
@@ -754,7 +750,7 @@ async function loadPayslips(c) {
             <div class="form-col"><div class="form-group"><label>Month</label><select id="mpMonthFilter" class="form-control" onchange="fetchMyPayslips()">${monthOpts}</select></div></div>
             <div class="form-col"><div class="form-group"><label>Year</label><select id="mpYearFilter" class="form-control" onchange="fetchMyPayslips()">${yearOpts}</select></div></div>
         </div>
-        <div class="table-container"><table><thead><tr><th>Period</th><th>Gross Pay</th><th>Calculated Deductions</th><th>Uncollected</th><th>Net Pay</th><th>Pay Date</th><th>Status</th><th>Actions</th></tr></thead><tbody id="myPayslipsBody"><tr><td colspan="8" style="text-align:center;padding:2rem;color:var(--text-light);">Loading...</td></tr></tbody></table></div>
+        <div class="table-container"><table><thead><tr><th>Period</th><th>Gross Pay</th><th>Total Deductions</th><th>Net Pay</th><th>Pay Date</th><th>Status</th><th>Actions</th></tr></thead><tbody id="myPayslipsBody"><tr><td colspan="7" style="text-align:center;padding:2rem;color:var(--text-light);">Loading...</td></tr></tbody></table></div>
         </div></div>`;
     await fetchMyPayslips();
 }
@@ -768,7 +764,7 @@ async function fetchMyPayslips() {
     const data = await apiCall(url);
     const tbody = document.getElementById('myPayslipsBody');
     if (!data.success || !data.payslips.length) {
-        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:2rem;color:var(--text-light);">No payslips found.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:2rem;color:var(--text-light);">No payslips found.</td></tr>';
         return;
     }
     payslipDocCache = data.payslips;
@@ -778,7 +774,6 @@ async function fetchMyPayslips() {
             <td>${escapeHtml(p.pay_period)}</td>
             <td>${peso(p.gross_pay)}</td>
             <td>${peso(p.total_deductions)}</td>
-            <td>${peso(p.unpaid_deduction_amount || 0)}</td>
             <td><strong>${peso(p.net_pay)}</strong></td>
             <td>${p.pay_date || '—'}</td>
             <td><span class="status ${sc}">${p.status.charAt(0).toUpperCase()+p.status.slice(1)}</span></td>
@@ -794,61 +789,197 @@ async function viewPayslipDoc(id) {
     const calculatedDeductions = Math.max(0, Number(p.total_deductions || 0));
     const unpaidDeductions = Math.max(0, Number(p.unpaid_deduction_amount || 0));
     const deductionsWithheld = Math.max(0, calculatedDeductions - unpaidDeductions);
+    const lateDeduction = isRegular ? Math.max(0, Number(p.late_deduction || 0)) : 0;
+    const absenceDeduction = isRegular ? Math.max(0, Number(p.absence_deduction || 0)) : 0;
+    const otherDeductions = lateDeduction + absenceDeduction;
+    const governmentDeductions = Number(p.sss_gsis || 0) + Number(p.philhealth || 0)
+        + Number(p.pagibig || 0) + Number(p.withholding_tax || 0);
+    const displayedBasicPay = Number(p.basic_pay || 0) + otherDeductions;
     const ci = await getCompanyInfo();
+    const period = isRegular && p.cutoff_start
+        ? `${escapeHtml(p.cutoff_start)} to ${escapeHtml(p.cutoff_end)}`
+        : escapeHtml(p.pay_period);
+    const approvedBy = p.approved_by_name || '?';
+    const taxableAllowance = Number(p.taxable_allow || 0);
+    const nonTaxableAllowance = Number(p.non_tax_allow || 0);
+    const companyLogoUrl = new URL('images/trafeco-logo.png', window.location.href).href;
+
     document.getElementById('payslipViewDocPreview').innerHTML = `
-        <div class="payslip-doc-header"><h2>${escapeHtml(ci.company_name || 'TRAFECO COMPANY')}</h2><p>${escapeHtml(ci.company_address || 'Payroll & Employee Management System')}</p></div>
-        <div class="payslip-doc-title">${isRegular ? 'PAYSLIP' : '13TH MONTH PAYSLIP'}</div>
-        <div class="payslip-doc-grid" style="margin-top:1rem;">
-            <div><span>Employee Name: </span><strong>${escapeHtml(p.employee_name)}</strong></div>
-            <div><span>${isRegular ? 'Cutoff: ' : 'Period: '}</span><strong>${isRegular && p.cutoff_start ? `${escapeHtml(p.cutoff_start)} to ${escapeHtml(p.cutoff_end)}` : escapeHtml(p.pay_period)}</strong></div>
-            <div><span>Staff ID: </span><strong>${escapeHtml(p.staff_id)}</strong></div>
-            <div><span>Pay Date: </span><strong>${p.pay_date || '—'}</strong></div>
-            <div><span>Generated By: </span><strong>${escapeHtml(p.generated_by_name || '—')}</strong></div>
-            <div><span>Status: </span><strong>${escapeHtml(p.status.charAt(0).toUpperCase()+p.status.slice(1))}${p.approved_by_name ? ' by '+escapeHtml(p.approved_by_name) : ''}</strong></div>
-        </div>
-        ${isRegular ? `
-        <table class="payslip-earnings-table" style="margin-top:1rem;"><thead><tr><th colspan="4">Attendance (DTR)</th></tr></thead>
-        <tbody><tr>
-            <td>Days Present: <strong>${p.days_present}</strong></td>
-            <td>Days Absent: <strong>${p.days_absent}</strong></td>
-            <td>On Leave: <strong>${p.days_leave}</strong></td>
-            <td>Late Deduction: <strong>${peso(p.late_deduction)}</strong></td>
-        </tr></tbody></table>` : ''}
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:1rem;">
-            <table class="payslip-earnings-table"><thead><tr><th colspan="2">Earnings</th></tr></thead><tbody>
-                <tr><td>${isRegular ? 'Basic Pay' : '13th Month Pay'}</td><td style="text-align:right;">${peso(p.basic_pay)}</td></tr>
-                ${isRegular ? '' : `<tr><td>Basic salary used for calculation</td><td style="text-align:right;">${peso(p.thirteenth_month_basis || 0)}</td></tr>`}
-                <tr><td>Paid Leave Pay</td><td style="text-align:right;">${peso(p.paid_leave_pay || 0)}</td></tr>
-                <tr><td>Taxable Allow.</td><td style="text-align:right;">${peso(p.taxable_allow)}</td></tr>
-                <tr><td>Non-Taxable Allow.</td><td style="text-align:right;">${peso(p.non_tax_allow)}</td></tr>
-            </tbody><tfoot><tr class="total-row"><td><strong>Gross Pay</strong></td><td style="text-align:right;"><strong>${peso(p.gross_pay)}</strong></td></tr></tfoot></table>
-            <table class="payslip-earnings-table"><thead><tr><th colspan="2">Deductions</th></tr></thead><tbody>
-                <tr><td>Withholding Tax</td><td style="text-align:right;">${peso(p.withholding_tax)}</td></tr>
-                <tr><td>SSS</td><td style="text-align:right;">${peso(p.sss_gsis)}</td></tr>
-                <tr><td>PhilHealth</td><td style="text-align:right;">${peso(p.philhealth)}</td></tr>
-                <tr><td>Pag-IBIG</td><td style="text-align:right;">${peso(p.pagibig)}</td></tr>
-                <tr><td>Calculated deductions</td><td style="text-align:right;">${peso(calculatedDeductions)}</td></tr>
-                <tr><td>Uncollected this period (not carried forward)</td><td style="text-align:right;">${peso(unpaidDeductions)}</td></tr>
-            </tbody><tfoot><tr class="total-row"><td><strong>Actually withheld</strong></td><td style="text-align:right;color:var(--danger);"><strong>${peso(deductionsWithheld)}</strong></td></tr></tfoot></table>
-        </div>
-        ${unpaidDeductions > 0 ? `<div class="alert alert-info" style="margin-top:1rem;"><i class="fas fa-info-circle"></i><div>${peso(unpaidDeductions)} of calculated deductions was not collected from this pay because earnings were insufficient. This amount is recorded for this payslip only and is not automatically carried forward.</div></div>` : ''}
-        <div class="payslip-net">NET PAY: ${peso(p.net_pay)}</div>
-        ${p.remarks ? `<div style="margin-top:0.75rem;color:var(--text-light);font-size:0.85rem;"><strong>Remarks:</strong> ${escapeHtml(p.remarks)}</div>` : ''}
-        <div class="payslip-footer">Computer-generated payslip.</div>`;
+        <article class="payslip-sheet">
+            <header class="payslip-company-header">
+                <img class="payslip-logo" src="${escapeHtml(companyLogoUrl)}" alt="Trafeco Transport Service Cooperative logo">
+                <h2>${escapeHtml(ci.company_name || 'TRAFECO')}</h2>
+                ${ci.company_address ? `<p>${escapeHtml(ci.company_address)}</p>` : ''}
+            </header>
+            <div class="payslip-title-row">
+                <div><small>PAY PERIOD</small><strong>${period}</strong></div>
+                <h1>${isRegular ? 'PAYSLIP' : '13TH MONTH PAYSLIP'}</h1>
+                <div><small>PAYMENT DATE</small><strong>${escapeHtml(p.pay_date || '?')}</strong></div>
+            </div>
+            <section class="payslip-employee-grid" aria-label="Employee and payroll details">
+                <div><small>EMPLOYEE NAME</small><strong>${escapeHtml(p.employee_name)}</strong></div>
+                <div><small>ID NUMBER</small><strong>${escapeHtml(p.staff_id)}</strong></div>
+                <div><small>PAYROLL STATUS</small><strong>${escapeHtml(p.status.charAt(0).toUpperCase()+p.status.slice(1))}</strong></div>
+                <div><small>GENERATED BY</small><strong>${escapeHtml(p.generated_by_name || '?')}</strong></div>
+                <div><small>APPROVED BY</small><strong>${escapeHtml(approvedBy)}</strong></div>
+                <div><small>${isRegular ? 'PAY FREQUENCY' : 'PAY TYPE'}</small><strong>${isRegular ? 'Semi-Monthly' : '13th Month'}</strong></div>
+            </section>
+            <div class="payslip-detail-columns">
+                <table class="payslip-earnings-table"><thead><tr><th>EARNINGS</th><th>AMOUNT</th></tr></thead><tbody>
+                    <tr><td>${isRegular ? 'Basic Pay (Semi-Monthly)' : '13th Month Pay'}</td><td>${peso(displayedBasicPay)}</td></tr>
+                    ${isRegular ? '' : `<tr><td>Basic salary used for calculation</td><td>${peso(p.thirteenth_month_basis || 0)}</td></tr>`}
+                    ${isRegular ? `<tr><td>Paid Leave Pay</td><td>${peso(p.paid_leave_pay || 0)}</td></tr>` : ''}
+                    ${taxableAllowance ? `<tr><td>Taxable Allowance</td><td>${peso(taxableAllowance)}</td></tr>` : ''}
+                    ${nonTaxableAllowance ? `<tr><td>Non-Taxable Allowance</td><td>${peso(nonTaxableAllowance)}</td></tr>` : ''}
+                </tbody></table>
+                <table class="payslip-earnings-table"><thead><tr><th>DEDUCTIONS</th><th>AMOUNT</th></tr></thead><tbody>
+                    <tr><td colspan="2" style="font-weight:bold;background:#f1f4f8;">Other Deductions</td></tr>
+                    <tr><td>Late Deduction</td><td>${peso(lateDeduction)}</td></tr>
+                    <tr><td>Absence Deduction</td><td>${peso(absenceDeduction)}</td></tr>
+                    <tr><td colspan="2" style="font-weight:bold;background:#f1f4f8;">Government Deductions</td></tr>
+                    <tr><td>SSS (Social Security System) Employee Share</td><td>${peso(p.sss_gsis)}</td></tr>
+                    <tr><td>PhilHealth Employee Share</td><td>${peso(p.philhealth)}</td></tr>
+                    <tr><td>Pag-IBIG (HDMF) Employee Share</td><td>${peso(p.pagibig)}</td></tr>
+                    <tr><td>Withholding Tax (BIR)</td><td>${peso(p.withholding_tax)}</td></tr>
+                    <tr><th>Government Deductions Total</th><th>${peso(governmentDeductions)}</th></tr>
+                </tbody></table>
+            </div>
+            <section class="payslip-totals" aria-label="Payslip totals">
+                <div><span>GROSS PAY / TOTAL EARNINGS</span><strong>${peso(p.gross_pay)}</strong></div>
+                <div><span>TOTAL DEDUCTIONS</span><strong>${peso(calculatedDeductions)}</strong></div>
+                <div class="payslip-net"><span>NET PAY</span><strong>${peso(p.net_pay)}</strong></div>
+            </section>
+            ${unpaidDeductions > 0 ? `<div class="payslip-unpaid-note">${peso(deductionsWithheld)} was withheld from this pay. ${peso(unpaidDeductions)} of calculated deductions could not be collected because earnings were insufficient. This amount is recorded for this payslip only and is not automatically carried forward.</div>` : ''}
+            <footer class="payslip-footer">Computer-generated payslip.</footer>
+        </article>`;
     document.getElementById('payslipViewModal').style.display = 'flex';
+}
+
+function psOpenPayslipPdf() {
+    const preview = document.getElementById('payslipViewDocPreview');
+    if (!preview || !preview.innerHTML.trim()) {
+        showToast('Open a payslip before creating its PDF.', 'error');
+        return;
+    }
+
+    const pdfWindow = window.open('', '_blank');
+    if (!pdfWindow) {
+        showToast('Allow pop-ups for this site to preview or save the payslip PDF.', 'error');
+        return;
+    }
+    pdfWindow.opener = null;
+    pdfWindow.document.open();
+    pdfWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Payslip PDF</title>
+        <style>
+            @page{size:A4;margin:14mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#17212b;padding:0;font-size:12px}
+            .payslip-sheet{width:100%;max-width:100%;margin:0 auto;padding:18px 22px;background:#fff;border:1px solid #7b8492;color:#17212b;break-inside:avoid}
+            .payslip-company-header{text-align:center;padding-bottom:12px;border-bottom:1px solid #28364d}.payslip-logo{display:block;width:74px;height:74px;margin:0 auto 7px;object-fit:contain}
+            .payslip-company-header h2{margin:0;font-size:18px;letter-spacing:.04em}.payslip-company-header p{margin:4px 0 0;color:#5c6675;font-size:10px}
+            .payslip-title-row{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid #cbd3df}.payslip-title-row h1{margin:0;color:#142748;font-size:16px;letter-spacing:.06em;text-align:center}.payslip-title-row>div{display:grid;gap:3px}.payslip-title-row>div:last-child{text-align:right}
+            .payslip-title-row small,.payslip-employee-grid small{color:#40516c;font-size:8px;font-weight:bold;letter-spacing:.05em}.payslip-title-row strong{font-size:9px;font-weight:600}
+            .payslip-employee-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));margin-bottom:14px;border-bottom:1px solid #cbd3df}.payslip-employee-grid>div{min-width:0;display:grid;gap:3px;padding:8px;border-right:1px solid #d8dee7;border-bottom:1px solid #e1e6ed}.payslip-employee-grid>div:nth-child(3n){border-right:0}.payslip-employee-grid strong{font-size:9px;overflow-wrap:anywhere}
+            .payslip-detail-columns{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}.payslip-earnings-table{width:100%;border-collapse:collapse;font-size:9px;table-layout:fixed;break-inside:avoid}.payslip-earnings-table th{background:#f1f4f8;color:#233756;padding:7px;text-align:left;border-bottom:1px solid #71809a}.payslip-earnings-table th:last-child{width:34%;text-align:right}.payslip-earnings-table td{padding:7px;border-bottom:1px solid #dce2ea}.payslip-earnings-table td:last-child{text-align:right;white-space:nowrap}
+            .payslip-totals{width: min(100%,360px);margin:20px 0 0 auto;border-top:1px solid #7b8492;padding-top:7px}.payslip-totals>div{display:flex;justify-content:space-between;gap:16px;padding:4px 0;font-size:10px}.payslip-totals .payslip-net{margin-top:6px;padding:8px 0;border-top:1px solid #142748;border-bottom:2px solid #142748;border-radius:0;background:transparent;color:#142748;font-size:12px}
+            .payslip-unpaid-note{margin-top:12px;padding:8px;border:1px solid #cbd3df;color:#36445a;font-size:9px}.payslip-footer{text-align:center;font-size:9px;color:#657084;margin-top:14px}
+            @media print{body{print-color-adjust:exact;-webkit-print-color-adjust:exact}}
+        </style></head><body>${preview.innerHTML}</body></html>`);
+    pdfWindow.document.close();
+    pdfWindow.focus();
+    const logo = pdfWindow.document.querySelector('.payslip-logo');
+    const printPdf = () => setTimeout(() => pdfWindow.print(), 300);
+    if (logo && !logo.complete) {
+        logo.addEventListener('load', printPdf, { once: true });
+        logo.addEventListener('error', printPdf, { once: true });
+    } else {
+        printPdf();
+    }
+}
+
+let payslipPdfLibraryPromise;
+function psLoadPdfLibrary() {
+    if (window.html2pdf) return Promise.resolve(window.html2pdf);
+    if (!payslipPdfLibraryPromise) {
+        payslipPdfLibraryPromise = new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+            script.onload = () => window.html2pdf ? resolve(window.html2pdf) : reject(new Error('PDF library did not initialize.'));
+            script.onerror = () => reject(new Error('Could not load the PDF export library. Check your internet connection and try again.'));
+            document.head.appendChild(script);
+        });
+    }
+    return payslipPdfLibraryPromise;
+}
+
+async function psExportPayslipPdf() {
+    const preview = document.getElementById('payslipViewDocPreview');
+    if (!preview || !preview.innerHTML.trim()) {
+        showToast('Open a payslip before exporting its PDF.', 'error');
+        return;
+    }
+
+    let overlay;
+    try {
+        const html2pdf = await psLoadPdfLibrary();
+        const sheet = preview.querySelector('.payslip-sheet');
+        if (!sheet) throw new Error('Payslip content is unavailable. Reopen the payslip and try again.');
+
+        overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(15,23,42,.72);overflow:auto;padding:20px;';
+        overlay.innerHTML = '<div style="position:sticky;top:0;text-align:center;padding:12px;background:#fff;border-radius:8px;margin:0 auto 14px;max-width:360px;font:14px Arial,sans-serif;color:#17212b;">Preparing payslip PDF…</div>';
+        const exportSheet = sheet.cloneNode(true);
+        exportSheet.style.cssText = 'width:182mm;max-width:182mm;margin:0 auto;padding:18px 22px;background:#fff;border:1px solid #7b8492;color:#17212b;font:12px Arial,sans-serif;box-sizing:border-box;';
+        const styles = document.createElement('style');
+        styles.textContent = `
+            *{box-sizing:border-box}.payslip-company-header{text-align:center;padding-bottom:12px;border-bottom:1px solid #28364d}.payslip-logo{display:block;width:74px;height:74px;margin:0 auto 7px;object-fit:contain}
+            .payslip-company-header h2{margin:0;font-size:18px;letter-spacing:.04em}.payslip-company-header p{margin:4px 0 0;color:#5c6675;font-size:10px}
+            .payslip-title-row{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid #cbd3df}.payslip-title-row h1{margin:0;color:#142748;font-size:16px;letter-spacing:.06em;text-align:center}.payslip-title-row>div{display:grid;gap:3px}.payslip-title-row>div:last-child{text-align:right}
+            .payslip-title-row small,.payslip-employee-grid small{color:#40516c;font-size:8px;font-weight:bold;letter-spacing:.05em}.payslip-title-row strong{font-size:9px;font-weight:600}
+            .payslip-employee-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));margin-bottom:14px;border-bottom:1px solid #cbd3df}.payslip-employee-grid>div{min-width:0;display:grid;gap:3px;padding:8px;border-right:1px solid #d8dee7;border-bottom:1px solid #e1e6ed}.payslip-employee-grid>div:nth-child(3n){border-right:0}.payslip-employee-grid strong{font-size:9px;overflow-wrap:anywhere}
+            .payslip-detail-columns{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}.payslip-earnings-table{width:100%;border-collapse:collapse;font-size:9px;table-layout:fixed;break-inside:avoid}.payslip-earnings-table th{background:#f1f4f8;color:#233756;padding:7px;text-align:left;border-bottom:1px solid #71809a}.payslip-earnings-table th:last-child{width:34%;text-align:right}.payslip-earnings-table td{padding:7px;border-bottom:1px solid #dce2ea}.payslip-earnings-table td:last-child{text-align:right;white-space:nowrap}
+            .payslip-totals{width:min(100%,360px);margin:20px 0 0 auto;border-top:1px solid #7b8492;padding-top:7px}.payslip-totals>div{display:flex;justify-content:space-between;gap:16px;padding:4px 0;font-size:10px}.payslip-totals .payslip-net{margin-top:6px;padding:8px 0;border-top:1px solid #142748;border-bottom:2px solid #142748;border-radius:0;background:transparent;color:#142748;font-size:12px}
+            .payslip-unpaid-note{margin-top:12px;padding:8px;border:1px solid #cbd3df;color:#36445a;font-size:9px}.payslip-footer{text-align:center;font-size:9px;color:#657084;margin-top:14px}`;
+        overlay.appendChild(styles);
+        overlay.appendChild(exportSheet);
+        document.body.appendChild(overlay);
+
+        const logo = exportSheet.querySelector('.payslip-logo');
+        if (logo && !logo.complete) {
+            await new Promise(resolve => {
+                logo.addEventListener('load', resolve, { once: true });
+                logo.addEventListener('error', resolve, { once: true });
+            });
+        }
+        const staffName = exportSheet.querySelector('.payslip-employee-grid>div:first-child strong')?.textContent || 'employee';
+        const payPeriod = exportSheet.querySelector('.payslip-title-row>div:first-child strong')?.textContent || 'period';
+        const filePart = value => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+        await html2pdf().set({
+            margin: [12, 14, 12, 14],
+            filename: `payslip-${filePart(staffName)}-${filePart(payPeriod)}.pdf`,
+            image: { type: 'jpeg', quality: 0.98 },
+            html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff', logging: false },
+            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+            pagebreak: { mode: ['avoid-all', 'css'] }
+        }).from(exportSheet).save();
+        showToast('Payslip PDF exported.', 'success');
+    } catch (error) {
+        console.error('Payslip PDF export failed:', error);
+        showToast(error.message || 'Could not export the payslip PDF.', 'error');
+    } finally {
+        overlay?.remove();
+    }
 }
 
 async function loadValidatePayroll(c) {
     c.innerHTML = `<div class="card"><div class="card-header"><div class="card-title"><i class="fas fa-check-double"></i>Approve / Decline Payslips</div></div>
         <div style="padding:1.4rem;">
         <div class="alert alert-info"><i class="fas fa-info-circle"></i><div>Review payslips submitted by the treasurer and approve or decline each one.</div></div>
-        <div class="table-container"><table><thead><tr><th>Employee</th><th>Period</th><th>Gross Pay</th><th>Uncollected</th><th>Net Pay</th><th>Submitted By</th><th>Date</th><th>Actions</th></tr></thead><tbody id="validatePayrollBody"><tr><td colspan="8" style="text-align:center;padding:2rem;color:var(--text-light);">Loading...</td></tr></tbody></table></div>
+        <div class="table-container"><table><thead><tr><th>Employee</th><th>Period</th><th>Gross Pay</th><th>Net Pay</th><th>Submitted By</th><th>Date</th><th>Actions</th></tr></thead><tbody id="validatePayrollBody"><tr><td colspan="7" style="text-align:center;padding:2rem;color:var(--text-light);">Loading...</td></tr></tbody></table></div>
         <div class="pager" id="validatePayrollPager"></div>
         </div></div>`;
     const data = await apiCall(`${API.PAYSLIPS}?action=pending`);
     const tbody = document.getElementById('validatePayrollBody');
     if (!data.success || !data.payslips.length) {
-        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:2rem;color:var(--text-light);">No payslips pending approval.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:2rem;color:var(--text-light);">No payslips pending approval.</td></tr>';
         document.getElementById('validatePayrollPager').innerHTML = '';
         return;
     }
@@ -857,7 +988,6 @@ async function loadValidatePayroll(c) {
         <td><strong>${escapeHtml(p.employee_name)}</strong><br><small>${escapeHtml(p.staff_id)}</small></td>
         <td>${escapeHtml(p.pay_period)}</td>
         <td>${peso(p.gross_pay)}</td>
-        <td>${peso(p.unpaid_deduction_amount || 0)}</td>
         <td>${peso(p.net_pay)}</td>
         <td>${escapeHtml(p.generated_by_name)}</td>
         <td>${new Date(p.created_at).toLocaleDateString('en-PH')}</td>

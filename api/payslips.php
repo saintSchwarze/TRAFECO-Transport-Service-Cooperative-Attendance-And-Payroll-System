@@ -44,16 +44,16 @@ function computeDtrForEmployee(PDO $db, int $empUserId, string $cutoffStart, str
         $calendarOffset = 0;
         while ($d <= $leaveEnd) {
             $dateKey = $d->format('Y-m-d');
-            $isPaternityDay = $lv['leave_type'] !== 'Paternity Leave' || ($paternityDates ? in_array($dateKey, $paternityDates, true) : $calendarOffset < 7);
+            $weekday = (int)$d->format('N') < 6;
+            $isPaternityDay = $lv['leave_type'] !== 'Paternity Leave' || ($weekday && ($paternityDates ? in_array($dateKey, $paternityDates, true) : $calendarOffset < 7));
             if ($isPaternityDay && $dateKey >= $cutoffStart && $dateKey <= $cutoffEnd) $leaveDays[$dateKey] = $lv['leave_type'];
             if ($isMaternity && $calendarOffset < $maternityPaidDays && $dateKey >= $cutoffStart && $dateKey <= $cutoffEnd) {
                 $cents = $baseCents + ($calendarOffset < $remainderCents ? 1 : 0);
                 $maternityPayByDate[$dateKey] = ($maternityPayByDate[$dateKey] ?? 0) + $cents;
             }
-            if ($lv['leave_type'] === 'Paternity Leave' && ($paternityDates ? in_array($dateKey, $paternityDates, true) : $calendarOffset < 7) && $dateKey >= $cutoffStart && $dateKey <= $cutoffEnd) {
+            if ($lv['leave_type'] === 'Paternity Leave' && $weekday && ($paternityDates ? in_array($dateKey, $paternityDates, true) : $calendarOffset < 7) && $dateKey >= $cutoffStart && $dateKey <= $cutoffEnd) {
                 $paternityPaidDates[$dateKey] = true;
             }
-            $weekday = (int)$d->format('N') < 6;
             if ($weekday && $dateKey >= $cutoffStart && $dateKey <= $cutoffEnd) {
                 if (($lv['leave_type'] === 'Vacation Leave' || ($lv['leave_type'] === 'Sick Leave' && $totalCalendarDays > 1)) && $paidWorkdays < 5) {
                     $leaveDays[$dateKey] = ['type' => $lv['leave_type'], 'paid' => true];
@@ -646,14 +646,18 @@ switch ($action) {
                 $dtr = computeDtrForEmployee($db, $empUserId, $cutoffStart, $cutoffEnd, $settings);
                 if (!$dtr) { $skipped++; continue; }
 
+                // Keep basic_pay as earned basic salary for the 13th-month
+                // calculation. Gross pay adds back attendance adjustments so
+                // the payslip can show them explicitly as deductions.
                 $basic = $dtr['earnedBasic'];
                 $paidLeavePay = $dtr['paidLeavePay'];
                 $taxableLeavePay = $dtr['taxablePaidLeavePay'];
-                $gross = round($basic + $paidLeavePay, 2);
+                $otherDeductions = round($dtr['lateDeduction'] + $dtr['absenceDeduction'], 2);
+                $gross = round($basic + $paidLeavePay + $otherDeductions, 2);
                 $sss = $dtr['sss']; $ph = $dtr['philhealth']; $pi = $dtr['pagibig'];
                 $taxableIncome = max(0, $basic + $dtr['taxablePaidLeavePay'] - $sss - $ph - $pi);
                 $wt = computeWithholdingTaxServer($taxableIncome, 2, $settings['taxBrackets']);
-                $empTotalDed = round($wt + $sss + $ph + $pi, 2);
+                $empTotalDed = round($wt + $sss + $ph + $pi + $otherDeductions, 2);
                 $unpaidDeductionAmount = round(max(0, $empTotalDed - max(0, $gross)), 2);
                 $net = round(max(0, $gross - $empTotalDed), 2);
 

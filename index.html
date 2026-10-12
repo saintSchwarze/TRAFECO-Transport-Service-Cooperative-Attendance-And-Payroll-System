@@ -8,7 +8,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
     <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="styles.css?v=20261012-payslip-actions">
 </head>
 <body>
 <!-- HTML BODY START: Line 682 -->
@@ -361,6 +361,11 @@
             <span class="modal-title"><i class="fas fa-file-invoice-dollar" style="margin-right:0.5rem;color:var(--green-600);"></i>Payslip</span>
             <button class="close-modal" onclick="document.getElementById('payslipViewModal').style.display='none';">&times;</button>
         </div>
+        <div class="payslip-modal-actions">
+            <button class="action-btn btn-sm" type="button" onclick="psOpenPayslipPdf()"><i class="fas fa-print"></i> Print PDF</button>
+            <button class="action-btn btn-sm" type="button" onclick="psExportPayslipPdf()"><i class="fas fa-file-download"></i> Export PDF</button>
+        </div>
+        <div class="payslip-modal-help">Print PDF opens the print dialog. Export PDF downloads the payslip directly.</div>
         <div style="padding:1.4rem;" id="payslipViewDocPreview"></div>
     </div>
 </div>
@@ -516,8 +521,8 @@
 <script src="js/sidebar-dashboard.js?v=20261011-payroll-menu"></script>
 <script src="js/qr-attendance.js?v=20261011-employee-onboarding"></script>
 <script src="js/employees.js?v=20261011-employee-onboarding"></script>
-<script src="js/leave.js?v=20261011-employee-onboarding"></script>
-<script src="js/payroll-payslips.js?v=20261013-thirteenth-batch"></script>
+<script src="js/leave.js?v=20261012-notification-history-dropdown"></script>
+<script src="js/payroll-payslips.js?v=20261012-print-export-pdf"></script>
 <script src="js/reports.js?v=20261011-employee-onboarding"></script>
 <script src="js/system.js?v=20261011-cutoff"></script>
 <script>window.turnstileScriptReady = new Promise((resolve, reject) => { window.onTurnstileLoaded = resolve; window.onTurnstileLoadError = () => reject(new Error('Cloudflare Turnstile failed to load.')); });</script>

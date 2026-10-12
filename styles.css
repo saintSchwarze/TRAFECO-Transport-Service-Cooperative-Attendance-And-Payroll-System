@@ -341,6 +341,31 @@ tr:hover td { background: #f8fafc; }
   min-height: 0;
 }
 
+#payslipViewModal .payslip-modal-actions {
+  flex: 0 0 auto;
+  min-height: 0;
+  overflow: visible;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.85rem 1.4rem 0.35rem;
+}
+#payslipViewModal .payslip-modal-actions .action-btn { margin: 0; white-space: nowrap; }
+#payslipViewModal .payslip-modal-help {
+  flex: 0 0 auto;
+  min-height: 0;
+  overflow: visible;
+  padding: 0.35rem 1.4rem 0.8rem;
+  color: var(--text-light);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  text-align: left;
+  overflow-wrap: anywhere;
+  border-bottom: 1px solid var(--border);
+}
+#payslipViewModal #payslipViewDocPreview { flex: 1 1 auto; overflow-y: auto; min-height: 0; }
+
 .modal-title { font-size: 1rem; font-weight: 700; color: var(--green-800); }
 .close-modal {
   background: none; border: none; font-size: 1.3rem;
@@ -601,6 +626,42 @@ tr:hover td { background: #f8fafc; }
 .payslip-net { text-align: center; font-size: 1.2rem; font-weight: 700; color: #fff; background: var(--green-700); padding: 1rem; border-radius: 8px; margin-top: 1rem; }
 .payslip-footer { text-align: center; font-size: 0.78rem; color: var(--text-light); margin-top: 1rem; }
 #payslipDocPreview { border: 1.5px solid var(--border); border-radius: 10px; padding: 1.5rem; background: #fafbfc; }
+
+/* Standard, print-ready payslip layout */
+.payslip-sheet { max-width: 820px; margin: 0 auto; padding: 1.6rem; background: #fff; border: 1px solid #7b8492; color: #17212b; font-family: Arial, sans-serif; }
+.payslip-company-header { text-align: center; padding-bottom: 1rem; border-bottom: 1px solid #28364d; }
+.payslip-logo { display: block; width: 74px; height: 74px; margin: 0 auto .45rem; object-fit: contain; }
+.payslip-company-header h2 { margin: 0; color: #17212b; font-size: 1.15rem; letter-spacing: .04em; }
+.payslip-company-header p { margin: .25rem 0 0; color: #5c6675; font-size: .72rem; }
+.payslip-title-row { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: .75rem; padding: .85rem 0; border-bottom: 1px solid #cbd3df; }
+.payslip-title-row h1 { margin: 0; color: #142748; font-size: 1.1rem; letter-spacing: .06em; text-align: center; }
+.payslip-title-row > div { display: grid; gap: .18rem; }
+.payslip-title-row > div:last-child { text-align: right; }
+.payslip-title-row small, .payslip-employee-grid small { color: #40516c; font-size: .57rem; font-weight: 700; letter-spacing: .05em; }
+.payslip-title-row strong { font-size: .67rem; font-weight: 600; }
+.payslip-employee-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); margin-bottom: 1rem; border-bottom: 1px solid #cbd3df; }
+.payslip-employee-grid > div { min-width: 0; display: grid; align-content: start; gap: .2rem; padding: .55rem .65rem; border-right: 1px solid #d8dee7; border-bottom: 1px solid #e1e6ed; }
+.payslip-employee-grid > div:nth-child(3n) { border-right: 0; }
+.payslip-employee-grid strong { font-size: .7rem; overflow-wrap: anywhere; }
+.payslip-detail-columns { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 1rem; }
+.payslip-detail-columns .payslip-earnings-table { font-size: .72rem; table-layout: fixed; }
+.payslip-detail-columns .payslip-earnings-table th { padding: .5rem; text-align: left; color: #233756; background: #f1f4f8; border-bottom: 1px solid #71809a; }
+.payslip-detail-columns .payslip-earnings-table th:last-child { text-align: right; width: 34%; }
+.payslip-detail-columns .payslip-earnings-table td { padding: .48rem .5rem; border-bottom: 1px solid #dce2ea; }
+.payslip-detail-columns .payslip-earnings-table td:last-child { text-align: right; white-space: nowrap; }
+.payslip-totals { width: min(100%, 360px); margin: 1.35rem 0 0 auto; border-top: 1px solid #7b8492; padding-top: .55rem; }
+.payslip-totals > div { display: flex; justify-content: space-between; gap: 1rem; padding: .25rem 0; font-size: .75rem; }
+.payslip-totals .payslip-net { margin-top: .45rem; padding: .55rem 0; border-top: 1px solid #142748; border-bottom: 2px solid #142748; border-radius: 0; background: transparent; color: #142748; font-size: .92rem; }
+.payslip-unpaid-note, .payslip-remarks { margin-top: .85rem; padding: .6rem; border: 1px solid #cbd3df; color: #36445a; font-size: .68rem; }
+.payslip-footer { color: #657084; font-size: .65rem; }
+@media (max-width: 620px) {
+    .payslip-sheet { padding: .9rem; }
+    .payslip-detail-columns { grid-template-columns: 1fr; }
+    .payslip-title-row { grid-template-columns: 1fr 1fr; }
+    .payslip-title-row h1 { grid-column: 1 / -1; grid-row: 1; }
+    .payslip-title-row > div:first-child { grid-column: 1; grid-row: 2; }
+    .payslip-title-row > div:last-child { grid-column: 2; grid-row: 2; }
+}
 
 /* ================================================================
    QR ATTENDANCE STYLES
