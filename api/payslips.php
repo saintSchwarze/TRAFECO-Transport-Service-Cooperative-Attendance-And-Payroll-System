@@ -664,14 +664,14 @@ switch ($action) {
                 $db->prepare('
                     INSERT INTO payslips
                       (employee_user_id, pay_period, payslip_type, payroll_batch_id, cutoff_start, cutoff_end, pay_date, employment_type,
-                       days_present, days_absent, days_leave, hours_rendered, hourly_rate_used, late_deduction, absence_deduction,
+                       days_present, days_absent, days_leave, hours_rendered, hourly_rate_used, daily_rate_used, late_deduction, absence_deduction,
                        basic_pay, paid_leave_pay, taxable_leave_pay, taxable_allow, non_tax_allow, gross_pay,
                        withholding_tax, sss_gsis, philhealth, pagibig, total_deductions, unpaid_deduction_amount, net_pay,
                        status, generated_by)
-                    VALUES (?, ?, "regular", ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, "pending", ?)
+                    VALUES (?, ?, "regular", ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, "pending", ?)
                 ')->execute([
                     $empUserId, $payPeriod, $batchId, $cutoffStart, $cutoffEnd, $payDate ?: null, $dtr['employee']['employmentType'],
-                    $dtr['daysPresent'], $dtr['daysAbsent'], $dtr['daysLeave'], $dtr['hoursRendered'], $dtr['hourlyRate'], $dtr['lateDeduction'], $dtr['absenceDeduction'],
+                    $dtr['daysPresent'], $dtr['daysAbsent'], $dtr['daysLeave'], $dtr['hoursRendered'], $dtr['hourlyRate'], $dtr['dailyRate'], $dtr['lateDeduction'], $dtr['absenceDeduction'],
                     $basic, $paidLeavePay, $taxableLeavePay, $gross,
                     $wt, $sss, $ph, $pi, $empTotalDed, $unpaidDeductionAmount, $net,
                     $user['id']

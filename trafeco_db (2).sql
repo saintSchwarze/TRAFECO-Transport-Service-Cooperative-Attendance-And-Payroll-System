@@ -3935,6 +3935,7 @@ CREATE TABLE `payslips` (
   `days_leave` decimal(5,2) DEFAULT 0.00,
   `hours_rendered` decimal(6,2) DEFAULT 0.00,
   `hourly_rate_used` decimal(10,2) DEFAULT 0.00,
+  `daily_rate_used` decimal(10,2) NOT NULL DEFAULT 0.00,
   `rate_per_hour` decimal(10,2) DEFAULT 0.00,
   `late_deduction` decimal(12,2) DEFAULT 0.00,
   `absence_deduction` decimal(12,2) DEFAULT 0.00,
@@ -4532,3 +4533,9 @@ COMMIT;
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
 /*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
+
+UPDATE `payslips`
+SET `daily_rate_used` = ROUND(COALESCE(`hourly_rate_used`, 0) * 8, 2)
+WHERE `employment_type` = 'Full-time'
+  AND `payslip_type` = 'regular'
+  AND COALESCE(`daily_rate_used`, 0) = 0;
